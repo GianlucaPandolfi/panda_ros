@@ -1,0 +1,5 @@
+uint8 SUCCESS=0
+uint8 FAILURE=1
+uint8 SIMULATION_NOT_STARTED=2
+
+uint8 state

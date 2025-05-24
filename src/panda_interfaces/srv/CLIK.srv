@@ -1,0 +1,5 @@
+JointsPos joints
+geometry_msgs/Pose final_pose
+CLIKParameters params
+---
+JointsPos joints
