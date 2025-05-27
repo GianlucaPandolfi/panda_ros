@@ -38,7 +38,7 @@ def generate_launch_description():
 
     DeclareLaunchArgument(
         'use_sim_time',
-        default_value='false',
+        default_value='true',
         description='Use simulation (Gazebo) clock if true')
 
     robot_state = Node(
@@ -73,6 +73,15 @@ def generate_launch_description():
         parameters=[{
                 'config_file': os.path.join(pkg_panda_world, 'config', 'bridge.yaml'),
                 'qos_overrides./tf_static.publisher.durability': 'transient_local',
+        }],
+        output='screen'
+    )
+
+    joint_state_publisher_patched = Node(
+        package='panda_world',
+        executable='joint_state_publisher_effort_patcher',
+        parameters=[{
+            'use_sim_time': use_sim_time
         }],
         output='screen'
     )
@@ -148,5 +157,6 @@ def generate_launch_description():
     ld.add_action(load_nodes)
     ld.add_action(robot_state)
     ld.add_action(bridge)
+    ld.add_action(joint_state_publisher_patched)
 
     return ld

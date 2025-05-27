@@ -1,4 +1,6 @@
 #include "panda_interfaces/srv/send_joints_pos_cmd.hpp"
+#include "panda_interfaces/msg/joints_pos.hpp"
+#include "panda_utils/constants.hpp"
 #include "rclcpp/rclcpp.hpp"
 #include "std_msgs/msg/float64.hpp"
 #include <memory>
@@ -9,56 +11,46 @@
 #include <rclcpp/timer.hpp>
 #include <rclcpp/utilities.hpp>
 #include <vector>
-#include "panda_utils/constants.hpp"
 
 class SendJointsCmdPosServer : public rclcpp::Node {
 public:
   SendJointsCmdPosServer() : Node("send_joints_cmd_pos") {
 
-    // Create publishers to cmd pos topic for position movement
-    auto topic_names = {
-        "/joint1/cmd_pos", "/joint2/cmd_pos", "/joint3/cmd_pos",
-        "/joint4/cmd_pos", "/joint5/cmd_pos", "/joint6/cmd_pos",
-        "/joint7/cmd_pos",
-    };
-
-    auto topic_qos = 10;
-    for (const auto &name : topic_names) {
-      auto pub =
-          this->create_publisher<std_msgs::msg::Float64>(name, topic_qos);
-      joints_pubs.push_back(pub);
+    for (const auto &name : panda_interface_names::bridge_pos_cmd_topic_names) {
+      auto pub = this->create_publisher<std_msgs::msg::Float64>(
+          name, panda_interface_names::DEFAULT_TOPIC_QOS);
+      joints_cmd_pubs.push_back(pub);
     }
 
     // Create service for publication
-    auto send_pos_cmd =
-        [this](const std::shared_ptr<
-                   panda_interfaces::srv::SendJointsPosCmd_Request>
-                   request,
-               std::shared_ptr<panda_interfaces::srv::SendJointsPosCmd_Response>
-                   response) {
-          auto joints_values = request->joint_values.joint_values;
-          for (size_t i = 0;
-               i < std::min(joints_values.size(), joints_pubs.size()); ++i) {
+    auto send_joints_pos = [this](panda_interfaces::msg::JointsPos mess) {
+      for (size_t i = 0;
+           i < std::min(mess.joint_values.size(), joints_cmd_pubs.size());
+           ++i) {
 
-            double joint_val = joints_values[i];
-            auto pub = this->joints_pubs[i];
-            std_msgs::msg::Float64 mess;
-            mess.data = joint_val;
-            pub->publish(mess);
-          }
+        double joint_val = mess.joint_values[i];
+        auto pub = this->joints_cmd_pubs[i];
+        std_msgs::msg::Float64 pos;
+        pos.data = joint_val;
+        pub->publish(pos);
+      }
+    };
 
-          response->result = response->OK;
-        };
+    joints_pos_sub =
+        this->create_subscription<panda_interfaces::msg::JointsPos>(
+            panda_interface_names::panda_pos_cmd_topic_name,
+            panda_interface_names::DEFAULT_TOPIC_QOS, send_joints_pos);
 
-    service = this->create_service<panda_interfaces::srv::SendJointsPosCmd>(
-        panda_interface_names::joints_cmd_pos_service_name, send_pos_cmd, topic_qos);
-
-    RCLCPP_INFO(this->get_logger(), "Service started");
+    RCLCPP_INFO_STREAM(this->get_logger(),
+                       "Created subscriber to "
+                           << panda_interface_names::panda_pos_cmd_topic_name);
   }
 
 private:
-  std::vector<rclcpp::Publisher<std_msgs::msg::Float64>::SharedPtr> joints_pubs;
-  rclcpp::Service<panda_interfaces::srv::SendJointsPosCmd>::SharedPtr service;
+  std::vector<rclcpp::Publisher<std_msgs::msg::Float64>::SharedPtr>
+      joints_cmd_pubs;
+  rclcpp::Subscription<panda_interfaces::msg::JointsPos>::SharedPtr
+      joints_pos_sub;
 };
 
 int main(int argc, char *argv[]) {

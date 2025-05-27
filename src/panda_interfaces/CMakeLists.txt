@@ -14,6 +14,7 @@ find_package(geometry_msgs REQUIRED)
 rosidl_generate_interfaces(${PROJECT_NAME}
   "./msg/JacobColumn.msg"
   "./msg/JointsPos.msg"
+  "./msg/JointsEffort.msg"
   "./srv/SendJointsPosCmd.srv"
   "./srv/CalculateJacobian.srv"
   "./msg/JacobianMatrix.msg"

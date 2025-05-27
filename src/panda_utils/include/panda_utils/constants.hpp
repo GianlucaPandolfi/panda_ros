@@ -19,4 +19,17 @@ const std::string forward_kine_service_name{"forward_kine"};
 const std::string jacob_calc_service_name{"calculate_jacobian"};
 const std::string joints_cmd_pos_service_name{"send_joints_pos_cmd"};
 const std::string clik_service_name{"clik"};
+const std::string panda_effort_cmd_topic_name{"/panda/cmd/effort"};
+const std::string panda_pos_cmd_topic_name{"/panda/cmd/pos"};
+const auto bridge_effort_cmd_topic_names = {
+    "/joint1/cmd_force", "/joint2/cmd_force", "/joint3/cmd_force",
+    "/joint4/cmd_force", "/joint5/cmd_force", "/joint6/cmd_force",
+    "/joint7/cmd_force",
+};
+const auto bridge_pos_cmd_topic_names = {
+    "/joint1/cmd_pos", "/joint2/cmd_pos", "/joint3/cmd_pos", "/joint4/cmd_pos",
+    "/joint5/cmd_pos", "/joint6/cmd_pos", "/joint7/cmd_pos",
+};
+
+const int DEFAULT_TOPIC_QOS = 10;
 } // namespace panda_interface_names

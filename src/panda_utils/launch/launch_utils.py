@@ -25,18 +25,17 @@ def generate_launch_description():
             'use_sim_time': False,
         }],
     )
-    # clik = Node(
-    #     package='panda_utils',
-    #     executable='calc_clik_server',
-    #     parameters=[{
-    #         'use_sim_time': False,
-    #     }],
-    #     # arguments=['--ros-args', '--log-level', 'DEBUG'],
-    # )
+    effort_cmd_server = Node(
+        package='panda_utils',
+        executable='send_joints_effort_server',
+        parameters=[{
+            'use_sim_time': False,
+        }],
+    )
 
     return LaunchDescription([
         forward_kine,
         jacobian_calculator,
-        # clik,
-        pos_cmds_joints
+        pos_cmds_joints,
+        effort_cmd_server
     ])

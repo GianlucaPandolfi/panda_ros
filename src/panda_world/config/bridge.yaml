@@ -6,7 +6,7 @@
   gz_type_name: "gz.msgs.Clock"
 
 # Topic publishing joint states
-- ros_topic_name: "/joint_states"
+- ros_topic_name: "/joint_states_no_effort"
   gz_topic_name: "/world/panda_world/model/panda/joint_state"
   ros_type_name: "sensor_msgs/msg/JointState"
   gz_type_name: "gz.msgs.Model"

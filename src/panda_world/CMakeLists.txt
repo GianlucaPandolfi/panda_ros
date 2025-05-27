@@ -8,6 +8,16 @@ endif()
 # find dependencies
 find_package(ament_cmake REQUIRED)
 find_package(rclcpp REQUIRED)
+find_package(sensor_msgs REQUIRED)
+find_package(panda_interfaces REQUIRED)
+
+add_executable(joint_state_publisher_effort_patcher ./src/joint_state_publisher_effort_patcher.cpp)
+ament_target_dependencies(joint_state_publisher_effort_patcher rclcpp sensor_msgs panda_interfaces)
+
+install(TARGETS
+  joint_state_publisher_effort_patcher
+  DESTINATION lib/${PROJECT_NAME}
+)
 
 install(
   DIRECTORY

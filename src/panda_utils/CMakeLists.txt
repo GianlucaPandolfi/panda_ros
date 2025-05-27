@@ -33,6 +33,14 @@ add_executable(send_joints_cmd_simple_client ./src/send_joints_pos_cmd_client.cp
 ament_target_dependencies(send_joints_cmd_simple_client rclcpp panda_interfaces std_msgs tf2_eigen)
 # target_link_libraries(send_joints_cmd_simple_client constants)
 
+add_executable(send_joints_effort_server ./src/send_joints_effort_cmd.cpp)
+ament_target_dependencies(send_joints_effort_server rclcpp panda_interfaces std_msgs tf2_eigen)
+# target_link_libraries(send_joints_cmd_server constants)
+
+add_executable(send_joints_effort_simple_client ./src/send_joints_effort_cmd_client.cpp)
+ament_target_dependencies(send_joints_effort_simple_client rclcpp panda_interfaces std_msgs tf2_eigen)
+# target_link_libraries(send_joints_cmd_simple_client constants)
+
 add_executable(calc_jacobian_server ./src/jacobian_server.cpp)
 ament_target_dependencies(calc_jacobian_server rclcpp panda_interfaces std_msgs tf2_eigen tf2 tf2_msgs)
 # target_link_libraries(calc_jacobian_server constants)
@@ -60,6 +68,8 @@ ament_target_dependencies(calc_clik_client rclcpp panda_interfaces std_msgs tf2_
 install(TARGETS
   send_joints_cmd_server
   send_joints_cmd_simple_client
+  send_joints_effort_server
+  send_joints_effort_simple_client
   calc_jacobian_server
   calc_jacobian_client
   calc_forward_kine_server
