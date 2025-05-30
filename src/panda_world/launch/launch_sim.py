@@ -81,7 +81,7 @@ def generate_launch_description():
         package='panda_world',
         executable='joint_state_publisher_effort_patcher',
         parameters=[{
-            'use_sim_time': use_sim_time
+            'use_sim_time': True
         }],
         output='screen'
     )

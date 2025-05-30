@@ -20,6 +20,7 @@ const std::string forward_kine_service_name{"forward_kine"};
 const std::string jacob_calc_service_name{"calculate_jacobian"};
 const std::string joints_cmd_pos_service_name{"send_joints_pos_cmd"};
 const std::string clik_service_name{"clik"};
+const std::string pd_grav_controller_node_name{"pd_plus_gravity_controller"};
 
 /////////////////////////////////////////////////////////////
 const std::string panda_effort_cmd_topic_name{"/panda/cmd/effort"};
@@ -52,5 +53,4 @@ const int DEFAULT_TOPIC_QOS = 10;
 } // namespace panda_interface_names
 namespace panda_constants {
 const std::string panda_model_effort{"/models/panda/panda.urdf"};
-const std::string get_panda_world_share_dir();
 }

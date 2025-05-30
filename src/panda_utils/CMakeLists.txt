@@ -16,6 +16,7 @@ find_package(tf2_msgs REQUIRED)
 find_package(sensor_msgs REQUIRED)
 find_package(pinocchio REQUIRED)
 find_package(ament_index_cpp REQUIRED)
+find_package(rclcpp_lifecycle REQUIRED)
 
 include_directories(
   include
@@ -64,6 +65,14 @@ add_executable(pinocchio_example ./examples/pinocchio_example.cpp)
 ament_target_dependencies(pinocchio_example rclcpp panda_interfaces std_msgs tf2_eigen tf2 tf2_msgs sensor_msgs pinocchio ament_index_cpp)
 target_link_libraries(pinocchio_example robot_model)
 
+add_executable(pd_grav_controller ./src/pd_grav_controller.cpp)
+ament_target_dependencies(pd_grav_controller rclcpp panda_interfaces std_msgs tf2_eigen tf2 tf2_msgs sensor_msgs pinocchio ament_index_cpp rclcpp_lifecycle)
+target_link_libraries(pd_grav_controller robot_model)
+
+add_executable(pd_grav_controller_demo ./examples/demo_pd_grav.cpp)
+ament_target_dependencies(pd_grav_controller_demo rclcpp panda_interfaces std_msgs tf2_eigen tf2 tf2_msgs sensor_msgs pinocchio ament_index_cpp rclcpp_lifecycle)
+target_link_libraries(pd_grav_controller_demo robot_model)
+
 install(TARGETS
   send_joints_cmd_server
   send_joints_cmd_simple_client
@@ -74,6 +83,8 @@ install(TARGETS
   clik_cmd_pub
   demo_node
   pinocchio_example
+  pd_grav_controller
+  pd_grav_controller_demo
   DESTINATION lib/${PROJECT_NAME}
 )
 

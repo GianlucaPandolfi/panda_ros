@@ -40,6 +40,9 @@ public:
         auto pub = joints_effort_pubs[i];
         effort.data = efforts[i];
         pub->publish(effort);
+        RCLCPP_INFO_STREAM(this->get_logger(),
+                           "Published on topic " << pub->get_topic_name()
+                                                 << ". Value: " << effort.data);
       }
       RCLCPP_INFO(this->get_logger(), "Sent effort command");
     };
@@ -49,12 +52,13 @@ public:
             panda_interface_names::panda_effort_cmd_topic_name,
             panda_interface_names::DEFAULT_TOPIC_QOS, save_joints_effort);
 
-    RCLCPP_DEBUG_STREAM(
+    RCLCPP_INFO_STREAM(
         this->get_logger(),
         "Created subscriber to "
             << panda_interface_names::panda_effort_cmd_topic_name);
 
-    timer = rclcpp::create_timer(this, this->get_clock(), 10ns, send_joints_effort);
+    timer =
+        rclcpp::create_timer(this, this->get_clock(), 10ns, send_joints_effort);
   }
 
 private:

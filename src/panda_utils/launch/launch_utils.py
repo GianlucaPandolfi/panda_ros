@@ -36,21 +36,21 @@ def generate_launch_description():
         package='panda_utils',
         executable='joint_traj',
         parameters=[{
-            'use_sim_time': False,
+            'use_sim_time': True,
         }],
     )
     cart_traj_server = Node(
         package='panda_utils',
         executable='cart_traj',
         parameters=[{
-            'use_sim_time': False,
+            'use_sim_time': True,
         }],
     )
     clik_cmd_pub = Node(
         package='panda_utils',
         executable='clik_cmd_pub',
         parameters=[{
-            'use_sim_time': False,
+            'use_sim_time': True,
         }],
     )
 
