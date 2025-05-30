@@ -36,36 +36,17 @@ ament_target_dependencies(robot_model
   tf2_eigen
 )
 
-
 add_executable(send_joints_cmd_server ./src/send_joints_pos_cmd.cpp)
 ament_target_dependencies(send_joints_cmd_server rclcpp panda_interfaces std_msgs tf2_eigen)
 
-add_executable(send_joints_cmd_simple_client ./src/send_joints_pos_cmd_client.cpp)
+add_executable(send_joints_cmd_simple_client ./examples/send_joints_pos_cmd_client.cpp)
 ament_target_dependencies(send_joints_cmd_simple_client rclcpp panda_interfaces std_msgs tf2_eigen)
 
 add_executable(send_joints_effort_server ./src/send_joints_effort_cmd.cpp)
 ament_target_dependencies(send_joints_effort_server rclcpp panda_interfaces std_msgs tf2_eigen)
 
-add_executable(send_joints_effort_simple_client ./src/send_joints_effort_cmd_client.cpp)
+add_executable(send_joints_effort_simple_client ./examples/send_joints_effort_cmd_client.cpp)
 ament_target_dependencies(send_joints_effort_simple_client rclcpp panda_interfaces std_msgs tf2_eigen)
-
-add_executable(calc_jacobian_server ./src/jacobian_server.cpp)
-ament_target_dependencies(calc_jacobian_server rclcpp panda_interfaces std_msgs tf2_eigen tf2 tf2_msgs)
-
-add_executable(calc_jacobian_client ./src/jacobian_client.cpp)
-ament_target_dependencies(calc_jacobian_client rclcpp panda_interfaces std_msgs tf2_eigen tf2 tf2_msgs)
-
-add_executable(calc_forward_kine_server ./src/forward_kine_server.cpp)
-ament_target_dependencies(calc_forward_kine_server rclcpp panda_interfaces std_msgs tf2_eigen tf2 tf2_msgs)
-
-add_executable(calc_forward_kine_client ./src/forward_kine_client.cpp)
-ament_target_dependencies(calc_forward_kine_client rclcpp panda_interfaces std_msgs tf2_eigen tf2 tf2_msgs)
-
-add_executable(calc_clik_server ./src/clik_server.cpp)
-ament_target_dependencies(calc_clik_server rclcpp panda_interfaces std_msgs tf2_eigen tf2 tf2_msgs)
-
-add_executable(calc_clik_client ./src/clik_client.cpp)
-ament_target_dependencies(calc_clik_client rclcpp panda_interfaces std_msgs tf2_eigen tf2 tf2_msgs)
 
 add_executable(joint_traj ./src/joint_traj.cpp)
 ament_target_dependencies(joint_traj rclcpp panda_interfaces std_msgs tf2_eigen tf2 tf2_msgs sensor_msgs)
@@ -76,10 +57,10 @@ ament_target_dependencies(cart_traj rclcpp panda_interfaces std_msgs tf2_eigen t
 add_executable(clik_cmd_pub ./src/clik_cmd_publisher.cpp)
 ament_target_dependencies(clik_cmd_pub rclcpp panda_interfaces std_msgs tf2_eigen tf2 tf2_msgs sensor_msgs)
 
-add_executable(demo_node ./src/demo_node.cpp)
+add_executable(demo_node ./examples/demo_node.cpp)
 ament_target_dependencies(demo_node rclcpp panda_interfaces std_msgs tf2_eigen tf2 tf2_msgs sensor_msgs)
 
-add_executable(pinocchio_example ./src/pinocchio_example.cpp)
+add_executable(pinocchio_example ./examples/pinocchio_example.cpp)
 ament_target_dependencies(pinocchio_example rclcpp panda_interfaces std_msgs tf2_eigen tf2 tf2_msgs sensor_msgs pinocchio ament_index_cpp)
 target_link_libraries(pinocchio_example robot_model)
 
@@ -88,12 +69,6 @@ install(TARGETS
   send_joints_cmd_simple_client
   send_joints_effort_server
   send_joints_effort_simple_client
-  calc_jacobian_server
-  calc_jacobian_client
-  calc_forward_kine_server
-  calc_forward_kine_client
-  calc_clik_server
-  calc_clik_client
   joint_traj
   cart_traj
   clik_cmd_pub
