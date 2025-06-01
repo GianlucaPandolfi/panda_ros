@@ -8,7 +8,7 @@
 #include <Eigen/src/Core/Matrix.h>
 #include <Eigen/src/Geometry/Quaternion.h>
 #include <chrono>
-#include <random>
+#include <cmath>
 #include <rclcpp/logging.hpp>
 #include <rclcpp/node.hpp>
 #include <rclcpp/rate.hpp>
@@ -31,6 +31,12 @@ public:
   CLIKPublisher()
       : rclcpp::Node("clik_cmd_publisher_node"),
         panda(PANDA_DH_PARAMETERS, PANDA_JOINT_TYPES, UNIT_QUATERNION) {
+
+    this->declare_parameter<double>("ts", 0.01);
+    this->declare_parameter<double>("gamma", 0.5);
+
+    ts = this->get_parameter("ts").as_double();
+    gamma = this->get_parameter("gamma").as_double() / ts;
 
     auto set_pose_cb = [this](const Pose msg) {
       desired_pose.position = msg.position;
@@ -59,7 +65,9 @@ public:
         }
         desired_pose = panda.pose(joints);
         this->joint_state_sub = nullptr;
-        RCLCPP_INFO(this->get_logger(), "Clik started");
+        RCLCPP_INFO_STREAM(this->get_logger(), "Clik started with ts = "
+                                                   << ts
+                                                   << " and gamma = " << gamma);
         timer->reset();
       }
     };
@@ -84,14 +92,8 @@ public:
 
       panda.clik_one_step(desired_pose, joints, ts, gamma,
                           Eigen::Vector<double, 6>::Zero());
-      RCLCPP_INFO(this->get_logger(), "CLIK step done");
-      // sensor_msgs::msg::JointState cmd;
-      // cmd.position.resize(7);
-      // cmd.name = joint_names_;
-      // cmd.header.stamp = this->now();
 
       panda_interfaces::msg::JointsPos cmd;
-      RCLCPP_INFO(this->get_logger(), "Assigning joint values to cmd");
       for (size_t i = 0; i < 7; i++) {
         // cmd.position[i] = joints[i];
         cmd.joint_values[i] = joints[i];
@@ -102,32 +104,42 @@ public:
         rclcpp::shutdown();
       }
     };
-    timer = this->create_wall_timer(
-        std::chrono::milliseconds((int)(ts / 1000.0)), control_cycle);
+    timer = rclcpp::create_timer(this, this->get_clock(),
+                                 std::chrono::milliseconds((int)(ts / 1000.0)),
+                                 control_cycle);
     timer->cancel();
     cmd_pos_pub = this->create_publisher<panda_interfaces::msg::JointsPos>(
         panda_interface_names::panda_pos_cmd_topic_name,
         panda_interface_names::DEFAULT_TOPIC_QOS);
+
     RCLCPP_INFO_STREAM(this->get_logger(), "Clik publisher ready with ts: "
                                                << ts
                                                << ", gamma: " << gamma * ts);
   }
 
 private:
+  // Gets:
+  // - Joints state
+  // - Desired reachable pose
+  // - Start & stop command for publishing
+  //
   rclcpp::Subscription<sensor_msgs::msg::JointState>::SharedPtr joint_state_sub;
   rclcpp::Subscription<geometry_msgs::msg::Pose>::SharedPtr desired_pose_sub;
   rclcpp::Subscription<std_msgs::msg::Bool>::SharedPtr start_clik_sub;
+
+  // Sends:
+  // - Desired joints position
   rclcpp::Publisher<panda_interfaces::msg::JointsPos>::SharedPtr cmd_pos_pub;
+
   sensor_msgs::msg::JointState joint_state{};
+
+  // TODO: change this class to the one with pinocchio / libfranka
   Robot<7> panda;
   rclcpp::TimerBase::SharedPtr timer;
   Pose desired_pose;
   Eigen::Quaterniond old_quaternion{};
   double ts = 0.01;
   double gamma = 0.5 / ts;
-  std::vector<std::string> joint_names_ = {
-      "panda_joint1", "panda_joint2", "panda_joint3", "panda_joint4",
-      "panda_joint5", "panda_joint6", "panda_joint7"};
 };
 
 int main(int argc, char *argv[]) {

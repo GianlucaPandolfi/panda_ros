@@ -94,21 +94,23 @@ private:
 
   void execute(const std::shared_ptr<GoalHandleCartMove> goal_handle) {
     RCLCPP_INFO(this->get_logger(), "Executing goal");
-    rclcpp::Rate loop_rate(100.0);
+    rclcpp::Rate loop_rate(100.0, this->get_clock());
+
     const auto goal = goal_handle->get_goal();
+
     auto feedback = std::make_shared<CartTraj::Feedback>();
     auto result = std::make_shared<CartTraj::Result>();
 
-    rclcpp::Time t0 = this->now();
+    rclcpp::Time t0 = this->get_clock()->now();
     rclcpp::Duration t = rclcpp::Duration(0, 0);
 
     rclcpp::Duration traj_duration = rclcpp::Duration(goal->total_time, 0);
 
     while (rclcpp::ok() && t < traj_duration) {
-      t = this->now() - t0;
+      t = this->get_clock()->now() - t0;
 
       geometry_msgs::msg::Pose cmd_pose;
-      RCLCPP_INFO(this->get_logger(), "Uploading next pose");
+      RCLCPP_DEBUG(this->get_logger(), "Uploading next pose");
 
       cmd_pose.position.x =
           qintic(goal->initial_pose.position.x, goal->desired_pose.position.x,
@@ -122,18 +124,18 @@ private:
 
       cmd_pose.orientation = goal->initial_pose.orientation;
 
-      RCLCPP_INFO(this->get_logger(), "Assigning time left");
+      RCLCPP_DEBUG(this->get_logger(), "Assigning time left");
       feedback->time_left = (traj_duration - t).seconds();
 
-      RCLCPP_INFO(this->get_logger(), "Publishing feedback");
+      RCLCPP_DEBUG(this->get_logger(), "Publishing feedback");
       goal_handle->publish_feedback(feedback);
 
-      RCLCPP_INFO(this->get_logger(), "Publish command");
+      RCLCPP_DEBUG(this->get_logger(), "Publish command");
       cmd_pose_clik_pub->publish(cmd_pose);
 
       // Sleep
       //
-      RCLCPP_INFO(this->get_logger(), "Sleep");
+      RCLCPP_DEBUG(this->get_logger(), "Sleep");
       loop_rate.sleep();
     }
 

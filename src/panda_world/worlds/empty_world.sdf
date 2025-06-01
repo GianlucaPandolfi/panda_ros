@@ -2,10 +2,17 @@
 <sdf version="1.10">
   <world name="panda_world">
 
-    <plugin name="gz::sim::systems::Physics" filename="gz-sim-physics-system" />
+    <plugin name="gz::sim::systems::Physics" filename="gz-sim-physics-system">
+    </plugin>
+
     <plugin name="gz::sim::systems::UserCommands" filename="gz-sim-user-commands-system" />
     <plugin name="gz::sim::systems::SceneBroadcaster" filename="gz-sim-scene-broadcaster-system" />
 
+    <physics type="ode">
+      <max_step_size>0.0001</max_step_size>
+      <!-- <real_time_factor>1</real_time_factor> -->
+      <real_time_update_rate>1000</real_time_update_rate>
+    </physics>
 
 
     <!-- Ambient Light -->

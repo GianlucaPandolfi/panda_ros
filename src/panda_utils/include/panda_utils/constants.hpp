@@ -45,12 +45,12 @@ const auto bridge_pos_cmd_topic_names = {
 };
 
 const std::vector<std::string> panda_joint_names = {
-    "fp3_joint1", "fp3_joint2", "fp3_joint3", "fp3_joint4",
-    "fp3_joint5", "fp3_joint6", "fp3_joint7",
+    "fr3_joint1", "fr3_joint2", "fr3_joint3", "fr3_joint4",
+    "fr3_joint5", "fr3_joint6", "fr3_joint7",
 };
 
 const int DEFAULT_TOPIC_QOS = 10;
 } // namespace panda_interface_names
 namespace panda_constants {
-const std::string panda_model_effort{"/models/panda/panda.urdf"};
+const std::string panda_model_effort{"/models/panda/panda_fr3.urdf"};
 }

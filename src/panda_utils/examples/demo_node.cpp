@@ -122,7 +122,7 @@ int main(int argc, char **argv) {
     desired_pose = initial_pose;
     desired_pose.position.x -= 0.1;
     desired_pose.position.y += 0.3;
-    desired_pose.position.z += 0.1;
+    desired_pose.position.z += 0.5;
     cart_goal.desired_pose = desired_pose;
     cart_goal.total_time = total_time;
 

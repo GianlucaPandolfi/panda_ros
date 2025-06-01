@@ -34,26 +34,26 @@ def generate_launch_description():
     pkg_panda_world = get_package_share_directory('panda_world')
 
     urdf = FileContent(
-        PathJoinSubstitution([FindPackageShare('panda_world'), 'models', 'panda', 'panda.urdf']))
+        PathJoinSubstitution([FindPackageShare('panda_world'), 'models', 'panda', 'panda_fr3.urdf']))
 
     DeclareLaunchArgument(
         'use_sim_time',
         default_value='true',
         description='Use simulation (Gazebo) clock if true')
 
-    robot_state = Node(
-        package='robot_state_publisher',
-        executable='robot_state_publisher',
-        name='robot_state_publisher',
-        output='screen',
-        parameters=[{'use_sim_time': use_sim_time, 'robot_description': urdf}],
-        arguments=[urdf])
+    # robot_state = Node(
+    #     package='robot_state_publisher',
+    #     executable='robot_state_publisher',
+    #     name='robot_state_publisher',
+    #     output='screen',
+    #     parameters=[{'use_sim_time': use_sim_time, 'robot_description': urdf}],
+    #     arguments=[urdf])
 
-    panda_fp3_model = PathJoinSubstitution([
+    panda_fr3_model = PathJoinSubstitution([
         pkg_panda_world,
         'models',
         'panda',
-        'panda.urdf'
+        'panda_fr3.urdf'
     ])
 
     # Setup to launch the simulator and Gazebo world
@@ -73,6 +73,7 @@ def generate_launch_description():
         parameters=[{
                 'config_file': os.path.join(pkg_panda_world, 'config', 'bridge.yaml'),
                 'qos_overrides./tf_static.publisher.durability': 'transient_local',
+            'use_sim_time': use_sim_time,
         }],
         output='screen'
     )
@@ -81,7 +82,7 @@ def generate_launch_description():
         package='panda_world',
         executable='joint_state_publisher_effort_patcher',
         parameters=[{
-            'use_sim_time': True
+            'use_sim_time': use_sim_time
         }],
         output='screen'
     )
@@ -103,7 +104,7 @@ def generate_launch_description():
         'world', default_value=TextSubstitution(text='panda_world'),
         description='World name')
     declare_file_cmd = DeclareLaunchArgument(
-        'file', default_value=panda_fp3_model,
+        'file', default_value=panda_fr3_model,
         description='SDF/URDF filename of model')
     declare_model_string_cmd = DeclareLaunchArgument(
         'model_string',
@@ -155,7 +156,7 @@ def generate_launch_description():
     # Add the actions to launch all of the create nodes
     ld.add_action(gz_sim)
     ld.add_action(load_nodes)
-    ld.add_action(robot_state)
+    # ld.add_action(robot_state)
     ld.add_action(bridge)
     ld.add_action(joint_state_publisher_patched)
 

@@ -40,11 +40,12 @@ public:
         auto pub = joints_effort_pubs[i];
         effort.data = efforts[i];
         pub->publish(effort);
-        RCLCPP_INFO_STREAM(this->get_logger(),
-                           "Published on topic " << pub->get_topic_name()
-                                                 << ". Value: " << effort.data);
+        RCLCPP_DEBUG_STREAM(this->get_logger(),
+                            "Published on topic "
+                                << pub->get_topic_name()
+                                << ". Value: " << effort.data);
       }
-      RCLCPP_INFO(this->get_logger(), "Sent effort command");
+      RCLCPP_DEBUG(this->get_logger(), "Sent effort command");
     };
 
     joints_effort_sub =
@@ -59,6 +60,13 @@ public:
 
     timer =
         rclcpp::create_timer(this, this->get_clock(), 10ns, send_joints_effort);
+
+    RCLCPP_INFO_STREAM(this->get_logger(),
+                       "Created node "
+                           << this->get_name() << " with clock "
+                           << (this->get_clock()->ros_time_is_active()
+                                   ? "simulation clock"
+                                   : "system clock"));
   }
 
 private:

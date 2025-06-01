@@ -8,6 +8,9 @@
 #include <ament_index_cpp/get_package_share_directory.hpp>
 #include <array>
 #include <chrono>
+#include <memory>
+#include <rcl/time.h>
+#include <rclcpp/clock.hpp>
 #include <rclcpp/logging.hpp>
 #include <rclcpp/rate.hpp>
 #include <rclcpp/rclcpp.hpp>
@@ -28,14 +31,32 @@ auto DEFAULT_URDF_PATH =
 class PDGravController : public rclcpp_lifecycle::LifecycleNode {
 
 public:
-  PDGravController(double Kp = 3750, double Kd = 750,
-                   double control_loop_freq = 1000.0,
-                   const std::string urdf_robot_path = DEFAULT_URDF_PATH)
+  PDGravController(const std::string urdf_robot_path = DEFAULT_URDF_PATH)
       : rclcpp_lifecycle::LifecycleNode(
             panda_interface_names::pd_grav_controller_node_name),
-        panda(urdf_robot_path, true),
-        control_loop_rate(control_loop_freq, this->get_clock()), Kp(Kp),
-        Kd(Kd) {
+        panda(urdf_robot_path, true) {
+
+    // Declare parameters
+    this->declare_parameter<double>("Kp", 3750.0);
+    this->declare_parameter<double>("Kd", 750.0);
+    this->declare_parameter<double>("control_freq", 1000.0);
+    this->declare_parameter<bool>("clamp", true);
+
+    // Get parameters
+    Kp = this->get_parameter("Kp").as_double();
+    Kd = this->get_parameter("Kd").as_double();
+    control_loop_rate = std::make_shared<rclcpp::Rate>(
+        this->get_parameter("control_freq").as_double(), this->get_clock());
+    clamp = this->get_parameter("clamp").as_bool();
+
+    // Taking joint limits
+
+    RCLCPP_INFO(this->get_logger(), "Getting effort limits");
+    effort_limits = panda.getModel().effortLimit;
+
+    RCLCPP_INFO(this->get_logger(), "Getting joint pos limits");
+    joint_min_limits = panda.getModel().lowerPositionLimit;
+    joint_max_limits = panda.getModel().upperPositionLimit;
 
     auto set_joint_state = [this](const JointState msg) {
       current_joint_config = msg;
@@ -46,11 +67,13 @@ public:
         panda_interface_names::DEFAULT_TOPIC_QOS, set_joint_state);
 
     auto set_desired_joint_config = [this](const JointsPos msg) {
-      RCLCPP_INFO(this->get_logger(), "Setting desired config");
+      RCLCPP_DEBUG(this->get_logger(), "Setting desired config");
       desired_joints_config.resize(msg.joint_values.size());
       for (size_t i = 0; i < msg.joint_values.size(); i++) {
+
         desired_joints_config[i] = msg.joint_values[i];
       }
+      this->clamp_joint_config();
     };
 
     desired_joints_config_sub = this->create_subscription<JointsPos>(
@@ -64,14 +87,18 @@ public:
 
   CallbackReturn on_configure(const rclcpp_lifecycle::State &) override {
     RCLCPP_INFO_STREAM(
-        get_logger(), "Configuring node"
-                          << this->get_name() << " using "
-                          << (this->get_clock()->get_clock_type() ==
-                                      RCL_ROS_TIME
-                                  ? "simulation clock"
-                                  : "system clock")
-                          << ", and control loop rate (Hz) "
-                          << 1.0 / (control_loop_rate.period().count() * 1e-9));
+        get_logger(),
+        "Configuring node "
+            << this->get_name() << " using "
+            << (this->get_clock()->ros_time_is_active() ? "simulation clock"
+                                                        : "system clock")
+            << " and rate clock "
+            << (this->control_loop_rate->get_type() == RCL_ROS_TIME
+                    ? "simulation clock"
+                    : "system clock")
+            << ", and control loop rate (Hz) "
+            << 1.0 / (control_loop_rate->period().count() * 1e-9)
+            << " with Kp = " << Kp << " and Kd = " << Kd);
 
     return CallbackReturn::SUCCESS;
   }
@@ -132,13 +159,17 @@ private:
   panda::RobotModel panda;
   JointState current_joint_config{};
   Eigen::VectorXd desired_joints_config{};
+  Eigen::VectorXd effort_limits{};
+  Eigen::VectorXd joint_min_limits{};
+  Eigen::VectorXd joint_max_limits{};
 
   // Control loop related variables
-  rclcpp::Rate control_loop_rate;
+  rclcpp::Rate::SharedPtr control_loop_rate;
   double Kp{};
   double Kd{};
   std::thread control_thread;
   std::atomic<bool> start_flag{false};
+  bool clamp;
 
   void publish_efforts(const Eigen::VectorXd &efforts) {
     JointsEffort efforts_cmd;
@@ -148,6 +179,24 @@ private:
     robot_joint_efforts_pub->publish(efforts_cmd);
   }
   void control();
+  void clamp_control(Eigen::VectorXd &control_input) {
+
+    for (int i = 0; i < control_input.size(); i++) {
+      if (control_input[i] > effort_limits[i]) {
+        control_input[i] = effort_limits[i];
+      } else if (control_input[i] < -effort_limits[i]) {
+        control_input[i] = -effort_limits[i];
+      }
+    }
+  }
+
+  void clamp_joint_config() {
+    for (int i = 0; i < this->desired_joints_config.size(); ++i) {
+      this->desired_joints_config[i] = std::min(
+          std::max(this->desired_joints_config[i], this->joint_min_limits[i]),
+          this->joint_max_limits[i]);
+    }
+  }
 };
 
 void PDGravController::control() {
@@ -158,7 +207,9 @@ void PDGravController::control() {
   Eigen::VectorXd gravity_vec;
   Eigen::VectorXd control_input;
 
-  RCLCPP_INFO_STREAM(this->get_logger(), "Current desired pose at initial loop: " << desired_joints_config);
+  RCLCPP_INFO_STREAM(
+      this->get_logger(),
+      "Current desired pose at initial loop: " << desired_joints_config);
 
   while (start_flag.load() && rclcpp::ok()) {
     // Update robot model
@@ -175,15 +226,21 @@ void PDGravController::control() {
     //
     gravity_vec = panda.getGravityVector(current_joints_config_vec);
     control_input = gravity_vec +
-                    Kp * (desired_joints_config - current_joints_config_vec) -
-                    Kd * current_joints_speed;
+                    Kp * (desired_joints_config - current_joints_config_vec)
+                    - Kd * current_joints_speed;
+    // control_input = -gravity_vec;
+
+    // Clamping control input
+    if (clamp) {
+      clamp_control(control_input);
+    }
 
     // Apply control
     //
-    RCLCPP_INFO_STREAM(this->get_logger(), control_input);
+    RCLCPP_DEBUG_STREAM(this->get_logger(), control_input);
     publish_efforts(control_input);
     // Sleep
-    control_loop_rate.sleep();
+    control_loop_rate->sleep();
   }
 
   if (!rclcpp::ok()) {

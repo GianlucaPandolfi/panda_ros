@@ -112,14 +112,19 @@ private:
     }
     q0 = *joint_state;
 
-    rclcpp::Time t0 = this->now();
+    rclcpp::Time t0 = this->get_clock()->now();
+    RCLCPP_INFO_STREAM(this->get_logger(),
+                       "Time now outside cylce" << t0.seconds());
     rclcpp::Duration t = rclcpp::Duration(0, 0);
 
     rclcpp::Duration traj_duration = rclcpp::Duration(goal->total_time, 0);
 
     using panda_interfaces::msg::JointsPos;
     while (rclcpp::ok() && t < traj_duration) {
-      t = this->now() - t0;
+      RCLCPP_INFO_STREAM(this->get_logger(),
+                         "Time now inside cylce"
+                             << this->get_clock()->now().seconds());
+      t = this->get_clock()->now() - t0;
       // Get next JointState
       JointsPos cmd;
       // cmd.position.resize(panda_interface_names::panda_joint_names.size());
@@ -128,7 +133,7 @@ private:
         // cmd.position[i] = qintic(q0.position[i], goal->desired_joint_pos[i],
         //                          t.seconds(), goal->total_time);
         cmd.joint_values[i] = qintic(q0.position[i], goal->desired_joint_pos[i],
-                                 t.seconds(), goal->total_time);
+                                     t.seconds(), goal->total_time);
       }
 
       // cmd.header.stamp = this->now();
