@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.8)
-project(panda_interfaces)
+project(image_processing)
 
 if(CMAKE_COMPILER_IS_GNUCXX OR CMAKE_CXX_COMPILER_ID MATCHES "Clang")
   add_compile_options(-Wall -Wextra -Wpedantic)
@@ -7,32 +7,20 @@ endif()
 
 # find dependencies
 find_package(ament_cmake REQUIRED)
-find_package(rosidl_default_generators REQUIRED)
-find_package(tf2_msgs REQUIRED)
-find_package(geometry_msgs REQUIRED)
+find_package(rclcpp REQUIRED)
 find_package(std_msgs REQUIRED)
+find_package(sensor_msgs REQUIRED)
+find_package(cv_bridge REQUIRED)
+find_package(image_transport REQUIRED)
+find_package(OpenCV REQUIRED)
 
-rosidl_generate_interfaces(${PROJECT_NAME}
-  "./msg/JacobColumn.msg"
-  "./msg/JointsPos.msg"
-  "./msg/JointsEffort.msg"
-  "./srv/SendJointsPosCmd.srv"
-  "./srv/CalculateJacobian.srv"
-  "./msg/JacobianMatrix.msg"
-  "./msg/Result.msg"
-  "./srv/ForwardKine.srv"
-  "./msg/CLIKParameters.msg"
-  "./srv/CLIK.srv"
-  "./action/CartTraj.action"
-  "./action/JointTraj.action"
-  "./msg/WrenchArray.msg"
-  "./msg/JointsCommand.msg"
-  "./msg/JointTorqueMeasure.msg"
-  "./msg/JointTorqueMeasureStamped.msg"
-  "./srv/SetComplianceMode.srv"
-  "./action/LoopCartTraj.action"
-  "./msg/HumanDetected.msg"
-  DEPENDENCIES tf2_msgs geometry_msgs std_msgs
+add_executable(opencv_example ./examples/opencv_example.cpp)
+ament_target_dependencies(opencv_example rclcpp std_msgs sensor_msgs cv_bridge image_transport OpenCV)
+
+
+install(TARGETS
+  opencv_example
+  DESTINATION lib/${PROJECT_NAME}
 )
 
 if(BUILD_TESTING)

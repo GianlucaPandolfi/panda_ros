@@ -90,6 +90,7 @@ public:
       //   return rclcpp_action::GoalResponse::REJECT;
       // }
 
+      RCLCPP_INFO(this->get_logger(), "Accepted goal");
       return rclcpp_action::GoalResponse::ACCEPT_AND_EXECUTE;
     };
 
@@ -121,30 +122,20 @@ public:
           // change_state(lifecycle_msgs::msg::Transition::TRANSITION_ACTIVATE,
           //              panda_interface_names::clik_node_name);
           // Start trajectory loop control thread
+          RCLCPP_INFO(this->get_logger(), "Changing trajectory flag");
           trajectory_in_progress.store(true);
-          action_thread = std::thread{
+
+          RCLCPP_INFO(this->get_logger(), "Starting thread");
+          std::thread{
               std::bind(&ControllerManager::control_traj_move, this, _1),
-              goal_handle};
+              goal_handle}
+              .detach();
         };
 
     cart_traj_server = rclcpp_action::create_server<TrajMove>(
         this, panda_interface_names::panda_cart_move_action_name,
         handle_goal_traj_move, handle_cancel_traj_move,
         handle_accepted_traj_move);
-
-    ////////////////////////////////////////////////////////////////////////
-
-    // Action client calling the actual action server nodes
-    //
-    cart_traj_client =
-        rclcpp_action::create_client<panda_interfaces::action::CartTraj>(
-            this, panda_interface_names::cart_traj_node_name +
-                      std::string{"/"} +
-                      panda_interface_names::panda_cart_move_action_name);
-
-    loop_traj_client =
-        rclcpp_action::create_client<panda_interfaces::action::LoopCartTraj>(
-            this, panda_interface_names::panda_cart_loop_action_name);
   }
 
   CallbackReturn on_configure(const rclcpp_lifecycle::State &) override {
@@ -185,6 +176,8 @@ private:
   ActionClient<panda_interfaces::action::LoopCartTraj>::SharedPtr
       loop_traj_client;
   std::optional<rclcpp_action::GoalUUID> loop_traj_goal_uuid{};
+
+  rclcpp::Node::SharedPtr trajectory_node;
 
   // Thread related variables
   std::atomic<bool> trajectory_in_progress{false};
@@ -299,12 +292,20 @@ private:
 
 void ControllerManager::control_traj_move(
     const std::shared_ptr<TrajMoveGoalHandle> goal_handle) {
+  RCLCPP_INFO(this->get_logger(), "Entered control_traj_move");
 
-  auto node = std::make_shared<rclcpp::Node>("cart_traj_bridge_node");
+  trajectory_node = std::make_shared<rclcpp::Node>("cart_traj_bridge_node");
+  RCLCPP_INFO(this->get_logger(), "Created trjaectory action node");
+  cart_traj_client =
+      rclcpp_action::create_client<panda_interfaces::action::CartTraj>(
+          trajectory_node,
+          panda_interface_names::cart_traj_node_name + std::string{"/"} +
+              panda_interface_names::panda_cart_move_action_name);
 
   auto goal_msg = goal_handle->get_goal();
 
   // Wait for the underlying server
+  RCLCPP_INFO(this->get_logger(), "Waiting service");
   if (!cart_traj_client->wait_for_action_server(std::chrono::seconds(5))) {
     goal_handle->abort(std::make_shared<TrajMove::Result>());
     return;
@@ -322,6 +323,8 @@ void ControllerManager::control_traj_move(
       };
 
   send_goal_options.result_callback = [this, goal_handle](const auto &result) {
+    RCLCPP_INFO(this->get_logger(), "Received result, changing traj flag");
+    trajectory_in_progress.store(false);
     if (result.code == rclcpp_action::ResultCode::SUCCEEDED) {
       goal_handle->succeed(result.result);
     } else {
@@ -331,7 +334,8 @@ void ControllerManager::control_traj_move(
 
   auto future_goal_handle =
       cart_traj_client->async_send_goal(*goal_msg, send_goal_options);
-  if (rclcpp::spin_until_future_complete(node, future_goal_handle) !=
+  RCLCPP_INFO(this->get_logger(), "Sent goal handle");
+  if (rclcpp::spin_until_future_complete(trajectory_node, future_goal_handle) !=
       rclcpp::FutureReturnCode::SUCCESS) {
     goal_handle->abort(std::make_shared<TrajMove::Result>());
     return;
@@ -345,6 +349,12 @@ void ControllerManager::control_traj_move(
   }
 
   cart_traj_internal_handler = client_goal_handle;
+  RCLCPP_INFO(this->get_logger(), "Assigned goal handle to internal handler");
+  while (rclcpp::ok() && client_goal_handle) {
+  }
+  if (!rclcpp::ok()) {
+    rclcpp::shutdown();
+  }
 }
 
 int main(int argc, char *argv[]) {

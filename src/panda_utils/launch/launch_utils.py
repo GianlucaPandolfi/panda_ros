@@ -37,6 +37,12 @@ def generate_launch_description():
         description='Controller PD + gravity rate'
     )
 
+    loop_rate_freq = DeclareLaunchArgument(
+        'loop_rate_freq',
+        default_value='1000.0',
+        description='Trajectory server rate frequency'
+    )
+
     clik_ts = DeclareLaunchArgument(
         'clik_ts',
         default_value='0.01',
@@ -53,6 +59,18 @@ def generate_launch_description():
         'clamp_effort_control',
         default_value='True',
         description='Clamp effort control from controller'
+    )
+
+    use_robot = DeclareLaunchArgument(
+        'use_robot',
+        default_value='False',
+        description='Use fr3 real robot (set also robot ip)'
+    )
+
+    robot_ip = DeclareLaunchArgument(
+        'robot_ip',
+        default_value='192.168.1.0',
+        description='fr3 robot ip'
     )
 
     pos_cmds_joints = Node(
@@ -85,6 +103,7 @@ def generate_launch_description():
         name='cart_traj_server',
         parameters=[{
             'use_sim_time': use_sim_time,
+            # 'loop_rate_freq': loop_rate_freq,
         }],
     )
     clik_cmd_pub = Node(
@@ -119,7 +138,10 @@ def generate_launch_description():
             'Kd': LaunchConfiguration('controller_kd'),
             'Md': LaunchConfiguration('controller_md'),
             'control_freq': LaunchConfiguration('controller_rate'),
-            'clamp': LaunchConfiguration('clamp_effort_control')
+            'clamp': LaunchConfiguration('clamp_effort_control'),
+            'use_robot': LaunchConfiguration('use_robot'),
+            'robot_ip': LaunchConfiguration('robot_ip')
+
         }],
     )
     controller_manager = Node(
@@ -136,15 +158,18 @@ def generate_launch_description():
         controller_kd,
         controller_md,
         control_rate,
+        loop_rate_freq,
         clamp_effort_control,
+        use_robot,
+        robot_ip,
         clik_ts,
         clik_gamma,
-        pos_cmds_joints,
         effort_cmd_server,
         joint_traj_server,
         cart_traj_server,
         clik_cmd_pub,
-        pd_grav_controller,
         inverse_dynamics_controller,
-        controller_manager
+        # pos_cmds_joints,
+        # pd_grav_controller,
+        # controller_manager
     ])

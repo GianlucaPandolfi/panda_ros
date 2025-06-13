@@ -33,16 +33,18 @@ using Pose = geometry_msgs::msg::Pose;
 
 auto DEFAULT_URDF_PATH =
     ament_index_cpp::get_package_share_directory("panda_world") +
-    panda_constants::panda_model_effort;
+    panda_constants::panda_model_effort_no_table;
 
 class CLIKPublisher : public rclcpp_lifecycle::LifecycleNode {
 
 public:
   CLIKPublisher(const std::string urdf_robot_path = DEFAULT_URDF_PATH)
       : rclcpp_lifecycle::LifecycleNode(panda_interface_names::clik_node_name),
-        panda(urdf_robot_path, true) {
+        panda(urdf_robot_path, true),
+        panda_mine(PANDA_DH_PARAMETERS, PANDA_JOINT_TYPES,
+                   OrientationConfiguration::UNIT_QUATERNION) {
 
-    this->declare_parameter<double>("ts", 0.01);
+    this->declare_parameter<double>("ts", 0.001);
     this->declare_parameter<double>("gamma", 0.5);
 
     auto set_pose_cb = [this](const Pose msg) {
@@ -50,6 +52,7 @@ public:
       Eigen::Quaterniond quaternion_des{msg.orientation.w, msg.orientation.x,
                                         msg.orientation.y, msg.orientation.z};
       quaternion_des = quaternionContinuity(quaternion_des, old_quaternion);
+      desired_pose.orientation.w = quaternion_des.w();
       desired_pose.orientation.x = quaternion_des.x();
       desired_pose.orientation.y = quaternion_des.y();
       desired_pose.orientation.z = quaternion_des.z();
@@ -73,12 +76,15 @@ public:
         panda_interface_names::DEFAULT_TOPIC_QOS, set_twist_cb);
 
     auto control_cycle = [this]() {
-      clik_one_step();
+      // clik_one_step();
+      panda_mine.clik_one_step(desired_pose, clik_joint_state, ts, gamma,
+                               desired_twist);
 
       panda_interfaces::msg::JointsCommand cmd;
       for (size_t i = 0; i < 7; i++) {
         cmd.positions[i] = clik_joint_state[i];
       }
+      cmd.header.stamp = this->now();
       cmd_pub->publish(cmd);
 
       if (!rclcpp::ok()) {
@@ -93,16 +99,27 @@ public:
     cmd_pub = this->create_publisher<panda_interfaces::msg::JointsCommand>(
         panda_interface_names::panda_joint_cmd_topic_name,
         panda_interface_names::DEFAULT_TOPIC_QOS);
-
-    RCLCPP_INFO_STREAM(this->get_logger(), "Clik publisher ready with ts: "
-                                               << ts
-                                               << ", gamma: " << gamma * ts);
   }
 
   CallbackReturn on_configure(const rclcpp_lifecycle::State &) override {
     RCLCPP_INFO(get_logger(), "Configuring...");
+
+    RCLCPP_INFO(this->get_logger(), "Getting joint pos limits");
+    joint_min_limits = panda.getModel().lowerPositionLimit;
+    joint_max_limits = panda.getModel().upperPositionLimit;
+
     ts = this->get_parameter("ts").as_double();
     gamma = this->get_parameter("gamma").as_double() / ts;
+
+    RCLCPP_INFO_STREAM(this->get_logger(), "Clik publisher configured with ts: "
+                                               << ts
+                                               << ", gamma: " << gamma * ts);
+
+    return CallbackReturn::SUCCESS;
+  }
+
+  CallbackReturn on_activate(const rclcpp_lifecycle::State &) override {
+    RCLCPP_INFO(get_logger(), "Activating...");
 
     auto set_joint_state =
         [this](const sensor_msgs::msg::JointState::SharedPtr msg) {
@@ -113,11 +130,6 @@ public:
         panda_interface_names::joint_state_topic_name,
         panda_interface_names::DEFAULT_TOPIC_QOS, set_joint_state);
 
-    return CallbackReturn::SUCCESS;
-  }
-
-  CallbackReturn on_activate(const rclcpp_lifecycle::State &) override {
-    RCLCPP_INFO(get_logger(), "Activating...");
     auto current_config_thread = [this]() {
       RCLCPP_INFO(this->get_logger(),
                   "Assigning desired pose to the current one");
@@ -133,8 +145,9 @@ public:
       for (size_t i = 0; i < 7; i++) {
         clik_joint_state[i] = joint_state->position[i];
       }
-      panda.computeForwardKinematics(clik_joint_state);
-      desired_pose = panda.getPose(frame_id_name);
+      // panda.computeForwardKinematics(clik_joint_state);
+      // desired_pose = panda.getPose(frame_id_name);
+      desired_pose = panda_mine.pose(clik_joint_state);
       this->joint_state_sub = nullptr;
       RCLCPP_INFO_STREAM(this->get_logger(),
                          "Clik started with ts = " << ts
@@ -178,9 +191,13 @@ private:
   rclcpp::Publisher<panda_interfaces::msg::JointsCommand>::SharedPtr cmd_pub;
 
   sensor_msgs::msg::JointState::SharedPtr joint_state{};
-  Eigen::VectorXd clik_joint_state{};
+  // Eigen::VectorXd clik_joint_state{};
+  Eigen::Vector<double, 7> clik_joint_state{};
 
   panda::RobotModel panda;
+  Robot<7> panda_mine;
+  Eigen::VectorXd joint_min_limits{};
+  Eigen::VectorXd joint_max_limits{};
   rclcpp::TimerBase::SharedPtr timer;
   Pose desired_pose;
   Vector6 desired_twist{};
@@ -191,6 +208,20 @@ private:
 
   void clik_one_step();
 };
+
+void clamp_vec(Eigen::Vector<double, 7> &vec, const Eigen::VectorXd &min_limits,
+               const Eigen::VectorXd &max_limits) {
+  for (int i = 0; i < vec.size(); ++i) {
+    vec[i] = std::min(std::max(vec[i], min_limits[i]), max_limits[i]);
+  }
+}
+
+void clamp_joint_config(Eigen::Vector<double, 7> &vec,
+                        const Eigen::VectorXd &min_limits,
+                        const Eigen::VectorXd &max_limits) {
+
+  clamp_vec(vec, min_limits, max_limits);
+}
 
 void CLIKPublisher::clik_one_step() {
   using geometry_msgs::msg::Pose;
@@ -204,6 +235,7 @@ void CLIKPublisher::clik_one_step() {
   final_quat.normalize();
 
   // Get current infos
+  panda.computeAll(clik_joint_state, clik_joint_state);
   Pose current_pose = panda.getPose(frame_id_name);
 
   Eigen::MatrixXd jacobian = panda.getGeometricalJacobian(frame_id_name);
@@ -224,16 +256,17 @@ void CLIKPublisher::clik_one_step() {
   error_quat = (final_quat * current_quat.inverse()).vec();
   error.block<3, 1>(3, 0) = error_quat;
 
-  RCLCPP_INFO_STREAM(this->get_logger(),
-                     "Error: [" << error[0] << ", " << error[1] << ", "
-                                << error[2] << ", " << error[3] << ", "
-                                << error[4] << ", " << error[5] << "]"
-                                << std::endl);
+  RCLCPP_DEBUG_STREAM(this->get_logger(),
+                      "Error: [" << error[0] << ", " << error[1] << ", "
+                                 << error[2] << ", " << error[3] << ", "
+                                 << error[4] << ", " << error[5] << "]"
+                                 << std::endl);
 
   Eigen::Vector<double, 6> q_dot = desired_twist + gamma * error;
 
   // Run algorithm
   clik_joint_state = clik_joint_state + ts * jacob_pinv.solve(q_dot);
+  clamp_joint_config(clik_joint_state, joint_min_limits, joint_max_limits);
 }
 
 int main(int argc, char *argv[]) {

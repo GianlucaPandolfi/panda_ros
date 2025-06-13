@@ -1,5 +1,7 @@
+#include "franka/robot_state.h"
 #include "panda_interfaces/msg/joints_effort.hpp"
 #include "sensor_msgs/msg/joint_state.hpp"
+#include <franka/robot.h>
 #include <rclcpp/create_timer.hpp>
 #include <rclcpp/logging.hpp>
 #include <rclcpp/rclcpp.hpp>
@@ -11,6 +13,16 @@ using namespace std::chrono_literals;
 class JointStateEffortPatcher : public rclcpp::Node {
 public:
   JointStateEffortPatcher() : Node("joint_state_effort_patcher") {
+
+    this->declare_parameter<std::string>("robot_ip", "192.168.1.0");
+    this->declare_parameter<bool>("use_robot", false);
+
+    use_robot = this->get_parameter("use_robot").as_bool();
+
+    if (use_robot) {
+      robot_ = franka::Robot(this->get_parameter("robot_ip").as_string());
+    }
+
     effort_sub_ =
         this->create_subscription<panda_interfaces::msg::JointsEffort>(
             "/panda/cmd/effort", 10,
@@ -24,10 +36,47 @@ public:
         "/joint_states_no_effort", 10,
         std::bind(&JointStateEffortPatcher::joint_states_callback, this,
                   std::placeholders::_1));
+
     auto publish_joint_states = [this]() {
       joint_states_pub_->publish(this->last_mess);
     };
-    timer = rclcpp::create_timer(this, this->get_clock(), 1ms, publish_joint_states);
+
+    auto publish_joint_states_robot = [this]() {
+      try {
+        franka::RobotState state = robot_.value().readOnce();
+        auto msg = sensor_msgs::msg::JointState{};
+        msg.position =
+            std::vector<double>(std::begin(state.q), std::end(state.q));
+        msg.velocity =
+            std::vector<double>(std::begin(state.dq), std::end(state.dq));
+        msg.effort =
+            std::vector<double>(std::begin(state.tau_J), std::end(state.tau_J));
+        joint_states_pub_->publish(msg);
+      } catch (const std::exception &e) {
+        RCLCPP_WARN(this->get_logger(), "Error reading state: %s", e.what());
+      }
+    };
+
+    if (use_robot) {
+      timer = rclcpp::create_timer(this, this->get_clock(), 1ms,
+                                   publish_joint_states_robot);
+      RCLCPP_INFO_STREAM(this->get_logger(),
+                         "Created node "
+                             << this->get_name() << " with clock "
+                             << (this->get_clock()->ros_time_is_active()
+                                     ? "simulation clock"
+                                     : "system clock")
+                             << " using real panda robot");
+    } else {
+      timer = rclcpp::create_timer(this, this->get_clock(), 1ms,
+                                   publish_joint_states);
+      RCLCPP_INFO_STREAM(this->get_logger(),
+                         "Created node "
+                             << this->get_name() << " with clock "
+                             << (this->get_clock()->ros_time_is_active()
+                                     ? "simulation clock"
+                                     : "system clock"));
+    }
   }
 
 private:
@@ -68,6 +117,9 @@ private:
   rclcpp::TimerBase::SharedPtr timer;
   double efforts[7]{};
   sensor_msgs::msg::JointState last_mess{};
+
+  bool use_robot;
+  std::optional<franka::Robot> robot_{};
 };
 
 int main(int argc, char **argv) {

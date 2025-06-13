@@ -38,6 +38,7 @@ const std::string panda_speed_cmd_topic_name{"/panda/cmd/speed"};
 const std::string panda_accel_cmd_topic_name{"/panda/cmd/accel"};
 
 const std::string joint_state_topic_name{"/joint_states"};
+const std::string panda_pose_state_topic_name{"/pose_state"};
 const std::string torque_sensor_topic_name{"/tau_sensors"};
 const std::string start_and_stop_clik_topic_name{"/clik_ctrl"};
 
@@ -66,4 +67,5 @@ const int DEFAULT_TOPIC_QOS = 10;
 } // namespace panda_interface_names
 namespace panda_constants {
 const std::string panda_model_effort{"/models/panda/panda_fr3.urdf"};
+const std::string panda_model_effort_no_table{"/models/panda/panda_fr3_no_table.urdf"};
 }

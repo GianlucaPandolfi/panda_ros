@@ -95,15 +95,6 @@ def generate_launch_description():
         output='screen'
     )
 
-    joint_state_publisher_patched = Node(
-        package='panda_world',
-        executable='joint_state_publisher_effort_patcher',
-        parameters=[{
-            'use_sim_time': use_sim_time
-        }],
-        output='screen'
-    )
-
     torque_publisher = Node(
         package='panda_world',
         executable='torque_sensor_publisher',
@@ -167,6 +158,15 @@ def generate_launch_description():
                      'P': pitch,
                      'Y': yaw,
                      }],
+    )
+
+    joint_state_publisher_patched = Node(
+        package='panda_world',
+        executable='joint_state_publisher_effort_patcher',
+        parameters=[{
+            'use_sim_time': use_sim_time,
+        }],
+        output='screen'
     )
 
     # Create the launch description and populate

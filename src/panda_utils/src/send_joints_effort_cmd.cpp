@@ -1,8 +1,12 @@
+#include "franka/exception.h"
 #include "panda_interfaces/msg/joints_effort.hpp"
 #include "panda_utils/constants.hpp"
 #include "rclcpp/rclcpp.hpp"
 #include "std_msgs/msg/float64.hpp"
+#include <array>
+#include <franka/robot.h>
 #include <memory>
+#include <optional>
 #include <rclcpp/create_timer.hpp>
 #include <rclcpp/logging.hpp>
 #include <rclcpp/node.hpp>
@@ -18,6 +22,15 @@ using namespace std::chrono_literals;
 class SendJointsEffortCmd : public rclcpp::Node {
 public:
   SendJointsEffortCmd() : Node("send_joints_cmd_effort") {
+
+    this->declare_parameter<std::string>("robot_ip", "192.168.1.0");
+    this->declare_parameter<bool>("use_robot", false);
+
+    use_robot = this->get_parameter("use_robot").as_bool();
+
+    if (use_robot) {
+      robot_ = franka::Robot(this->get_parameter("robot_ip").as_string());
+    }
 
     for (const auto &name :
          panda_interface_names::bridge_effort_cmd_topic_names) {
@@ -48,6 +61,17 @@ public:
       RCLCPP_DEBUG(this->get_logger(), "Sent effort command");
     };
 
+    auto send_joints_effort_robot = [this]() {
+      try {
+        robot_.value().control([this](const franka::RobotState &,
+                                      franka::Duration) -> franka::Torques {
+          return franka::Torques{efforts};
+        });
+      } catch (const franka::ControlException &e) {
+        RCLCPP_ERROR(this->get_logger(), "Control exception: %s", e.what());
+      }
+    };
+
     joints_effort_sub =
         this->create_subscription<panda_interfaces::msg::JointsEffort>(
             panda_interface_names::panda_effort_cmd_topic_name,
@@ -58,15 +82,26 @@ public:
         "Created subscriber to "
             << panda_interface_names::panda_effort_cmd_topic_name);
 
-    timer =
-        rclcpp::create_timer(this, this->get_clock(), 10ns, send_joints_effort);
-
-    RCLCPP_INFO_STREAM(this->get_logger(),
-                       "Created node "
-                           << this->get_name() << " with clock "
-                           << (this->get_clock()->ros_time_is_active()
-                                   ? "simulation clock"
-                                   : "system clock"));
+    if (use_robot) {
+      timer = rclcpp::create_timer(this, this->get_clock(), 1ms,
+                                   send_joints_effort_robot);
+      RCLCPP_INFO_STREAM(this->get_logger(),
+                         "Created node "
+                             << this->get_name() << " with clock "
+                             << (this->get_clock()->ros_time_is_active()
+                                     ? "simulation clock"
+                                     : "system clock")
+                             << " using real panda robot");
+    } else {
+      timer = rclcpp::create_timer(this, this->get_clock(), 1ms,
+                                   send_joints_effort);
+      RCLCPP_INFO_STREAM(this->get_logger(),
+                         "Created node "
+                             << this->get_name() << " with clock "
+                             << (this->get_clock()->ros_time_is_active()
+                                     ? "simulation clock"
+                                     : "system clock"));
+    }
   }
 
 private:
@@ -75,7 +110,10 @@ private:
   rclcpp::Subscription<panda_interfaces::msg::JointsEffort>::SharedPtr
       joints_effort_sub;
   rclcpp::TimerBase::SharedPtr timer;
-  double efforts[7]{};
+  std::array<double, 7> efforts{};
+
+  bool use_robot;
+  std::optional<franka::Robot> robot_{};
 };
 
 int main(int argc, char *argv[]) {

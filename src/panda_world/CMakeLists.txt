@@ -11,8 +11,16 @@ find_package(rclcpp REQUIRED)
 find_package(sensor_msgs REQUIRED)
 find_package(panda_interfaces REQUIRED)
 
+include_directories(
+  ~/libfranka/include/
+)
+
+link_directories(
+  ~/libfranka/build/
+)
 add_executable(joint_state_publisher_effort_patcher ./src/joint_state_publisher_effort_patcher.cpp)
 ament_target_dependencies(joint_state_publisher_effort_patcher rclcpp sensor_msgs panda_interfaces)
+target_link_libraries(joint_state_publisher_effort_patcher franka)
 
 add_executable(torque_sensor_publisher ./src/torque_sensors_publisher.cpp)
 ament_target_dependencies(torque_sensor_publisher rclcpp sensor_msgs panda_interfaces)

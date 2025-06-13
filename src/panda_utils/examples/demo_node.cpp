@@ -46,13 +46,13 @@ int main(int argc, char **argv) {
 
     JointTraj::Goal joint_goal;
     joint_goal.total_time = total_time; // 3 seconds
-    joint_goal.desired_joint_pos = {
+    joint_goal.desired_joint_cmd.positions = {
         0.0,   0.0, 0.0, -3.0 / 4.0 * M_PI, 0.0, 3.0 / 4.0 * M_PI,
         M_PI_4}; // final desired config
     //
     auto goal_options = rclcpp_action::Client<JointTraj>::SendGoalOptions();
     auto feedback_joint_traj =
-        [node](GoalHandleTrajMove::SharedPtr goal_handle,
+        [node](GoalHandleTrajMove::SharedPtr,
                const std::shared_ptr<const TrajMove::Feedback> feedback) {
           RCLCPP_INFO_STREAM(node->get_logger(), "Still "
                                                      << feedback->time_left

@@ -105,9 +105,6 @@ void RobotModel::computeForwardKinematics(const Eigen::VectorXd &q,
 
 pinocchio::SE3 RobotModel::getFramePose(const std::string &frame_name) {
   pinocchio::FrameIndex id = model_.getFrameId(frame_name);
-  for (auto frame : data_.oMf) {
-    std::cout << frame;
-  }
   return data_.oMf[id];
 }
 

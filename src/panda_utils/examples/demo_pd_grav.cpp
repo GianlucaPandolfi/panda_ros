@@ -295,7 +295,7 @@ void callee_script(std::shared_ptr<LifecycleServiceClient> lc_client,
   }
 }
 
-int main(int argc, char *argv[]) {
+int main(int argc, char **argv) {
 
   rclcpp::init(argc, argv);
 

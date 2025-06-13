@@ -1,4 +1,4 @@
-float64[] desired_joint_pos
+JointsCommand desired_joint_cmd
 float64 total_time
 ---
 bool completed

@@ -1,4 +1,5 @@
 #include "panda_interfaces/action/joint_traj.hpp"
+#include "panda_interfaces/msg/joints_command.hpp"
 #include "panda_interfaces/msg/joints_pos.hpp"
 #include "panda_utils/constants.hpp"
 #include "rclcpp/rclcpp.hpp"
@@ -50,17 +51,25 @@ public:
         panda_interface_names::joint_state_topic_name,
         panda_interface_names::DEFAULT_TOPIC_QOS, save_joints_state);
 
-    cmd_pos_pub = this->create_publisher<panda_interfaces::msg::JointsPos>(
-        panda_interface_names::panda_pos_cmd_topic_name,
+    cmd_pos_pub = this->create_publisher<panda_interfaces::msg::JointsCommand>(
+        panda_interface_names::panda_joint_cmd_topic_name,
         panda_interface_names::DEFAULT_TOPIC_QOS);
 
     auto handle_goal = [this](const rclcpp_action::GoalUUID uuid,
                               std::shared_ptr<const TrajMove::Goal> goal) {
       RCLCPP_INFO(this->get_logger(), "Received goal request");
       RCLCPP_INFO_STREAM(this->get_logger(),
-                         "Joint desired config is: "
-                             << goal->desired_joint_pos.data() << " in "
-                             << goal->total_time);
+                         "Joint desired config is: ["
+                             << goal->desired_joint_cmd.positions[0] << ", "
+                             << goal->desired_joint_cmd.positions[1] << ", "
+                             << goal->desired_joint_cmd.positions[2] << ", "
+                             << goal->desired_joint_cmd.positions[3] << ", "
+                             << goal->desired_joint_cmd.positions[4] << ", "
+                             << goal->desired_joint_cmd.positions[5] << ", "
+                             << goal->desired_joint_cmd.positions[6]
+                             << ", "
+                                "]"
+                             << " in " << goal->total_time);
       (void)uuid;
       return rclcpp_action::GoalResponse::ACCEPT_AND_EXECUTE;
     };
@@ -92,7 +101,8 @@ public:
 
 private:
   rclcpp::Subscription<JointState>::SharedPtr joint_state_sub;
-  rclcpp::Publisher<panda_interfaces::msg::JointsPos>::SharedPtr cmd_pos_pub;
+  rclcpp::Publisher<panda_interfaces::msg::JointsCommand>::SharedPtr
+      cmd_pos_pub;
   rclcpp_action::Server<TrajMove>::SharedPtr action_traj_server;
   JointState::SharedPtr joint_state;
 
@@ -119,25 +129,18 @@ private:
 
     rclcpp::Duration traj_duration = rclcpp::Duration(goal->total_time, 0);
 
-    using panda_interfaces::msg::JointsPos;
     while (rclcpp::ok() && t < traj_duration) {
-      RCLCPP_INFO_STREAM(this->get_logger(),
-                         "Time now inside cylce"
-                             << this->get_clock()->now().seconds());
       t = this->get_clock()->now() - t0;
       // Get next JointState
-      JointsPos cmd;
-      // cmd.position.resize(panda_interface_names::panda_joint_names.size());
+      panda_interfaces::msg::JointsCommand cmd;
 
       for (size_t i = 0; i < 7; i++) {
-        // cmd.position[i] = qintic(q0.position[i], goal->desired_joint_pos[i],
-        //                          t.seconds(), goal->total_time);
-        cmd.joint_values[i] = qintic(q0.position[i], goal->desired_joint_pos[i],
-                                     t.seconds(), goal->total_time);
+        cmd.positions[i] =
+            qintic(q0.position[i], goal->desired_joint_cmd.positions[i],
+                   t.seconds(), goal->total_time);
       }
 
-      // cmd.header.stamp = this->now();
-      // cmd.name = panda_interface_names::panda_joint_names;
+      cmd.header.stamp = this->now();
 
       feedback->time_left = (traj_duration - t).seconds();
 
