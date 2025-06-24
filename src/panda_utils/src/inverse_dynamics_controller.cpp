@@ -365,11 +365,13 @@ public:
       joint_state_to_pub.velocity.resize(7);
       joint_state_to_pub.effort.resize(7);
 
-      Eigen::Vector<double, 7> KP_{Kp, Kp, Kp, Kp, Kp * 3, Kp * 3, Kp * 4};
+      Eigen::Vector<double, 7> KP_{Kp, Kp, Kp, Kp, Kp, Kp, Kp};
+      // Eigen::Vector<double, 7> KP_{Kp, Kp, Kp, Kp, Kp * 3, Kp * 3, Kp * 4};
       Eigen::Matrix<double, 7, 7> KP = Eigen::Matrix<double, 7, 7>::Identity();
       KP.diagonal() = KP_;
 
-      Eigen::Vector<double, 7> KD_{Kd, Kd, Kd, Kd, Kd * 3, Kd * 3, Kd * 4};
+      Eigen::Vector<double, 7> KD_{Kd, Kd, Kd, Kd, Kd, Kd, Kd};
+      // Eigen::Vector<double, 7> KD_{Kd, Kd, Kd, Kd, Kd * 3, Kd * 3, Kd * 4};
       Eigen::Matrix<double, 7, 7> KD = Eigen::Matrix<double, 7, 7>::Identity();
       KD.diagonal() = KD_;
 
@@ -405,12 +407,23 @@ public:
         // - tau_f = torque required to compensate motor friction
         //
         // B(q)
-        Eigen::Map<const Eigen::Matrix<double, 7, 7>> mass_matrix(
-            this->panda_franka_model.value().mass(state).data());
+        std::array<double, 49> mass_matrix_raw =
+            this->panda_franka_model.value().mass(state);
+        Eigen::Matrix<double, 7, 7> mass_matrix;
+        for (size_t i = 0; i < 7; i++) {
+          for (size_t j = 0; j < 7; j++) {
+            mass_matrix(j, i) = mass_matrix_raw[i * 7 + j];
+          }
+        }
 
-        // Calculate only the coriolis term for the n(q, q_dot) term
-        Eigen::Map<const Eigen::Matrix<double, 7, 1>> coriolis(
-            this->panda_franka_model.value().coriolis(state).data());
+        // Eigen::Map<const Eigen::Matrix<double, 7, 1>> coriolis(
+        //     this->panda_franka_model.value().coriolis(state).data());
+        std::array<double, 7> coriolis_raw =
+            this->panda_franka_model.value().coriolis(state);
+        Eigen::Vector<double, 7> coriolis;
+        for (size_t i = 0; i < 7; i++) {
+          coriolis(i) = coriolis_raw[i];
+        }
 
         Eigen::Vector<double, 7> y;
         // If compliance mode: Kp = 0
@@ -495,6 +508,8 @@ public:
 
     if (use_robot) {
 
+      // Setting initial state to the current one of the robot if using real
+      // robot
       franka::RobotState initial_state = panda_franka->readOnce();
       for (size_t i = 0; i < 7; i++) {
         desired_joints_position[i] = initial_state.q[i];
@@ -603,6 +618,7 @@ public:
             }
             RCLCPP_INFO(this->get_logger(), "Shutdown print control thread");
           }}.detach();
+
           // control function says "sets realtime priority for the current
           // thread"
           panda_franka->control(robot_control_callback);
@@ -1083,7 +1099,7 @@ void InverseDynamicsController::control_libfranka_sim() {
   // for (size_t i = 0; i < 7; i++) {
   //   desired_joints_position[i] = initial_state.q[i];
   // }
-  
+
   RCLCPP_INFO(this->get_logger(), "Waiting for simulation to start");
   while (rclcpp::Time{current_joint_config->header.stamp} - this->now() ==
          rclcpp::Duration{0, 0}) {
