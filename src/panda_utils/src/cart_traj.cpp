@@ -159,22 +159,22 @@ private:
     RCLCPP_DEBUG(this->get_logger(), "Getting goal");
     const auto goal = goal_handle->get_goal();
 
-    // Desired orientation
-    Eigen::Quaterniond desired_quat{
-        goal->desired_pose.orientation.w, goal->desired_pose.orientation.x,
-        goal->desired_pose.orientation.y, goal->desired_pose.orientation.z};
-    desired_quat.normalize();
-    Eigen::AngleAxisd angle_axis_desired = Eigen::AngleAxisd{desired_quat};
-    double theta_f = angle_axis_desired.angle();
-    Eigen::Vector3d axis = angle_axis_desired.axis();
-
     // Initial orientation
     Eigen::Quaterniond initial_quat{
         goal->initial_pose.orientation.w, goal->initial_pose.orientation.x,
         goal->initial_pose.orientation.y, goal->initial_pose.orientation.z};
     initial_quat.normalize();
     Eigen::Matrix3d initial_rot{initial_quat};
-    Eigen::Vector3d initial_quat_vec = initial_quat.vec();
+
+    // Desired orientation
+    Eigen::Quaterniond desired_quat{
+        goal->desired_pose.orientation.w, goal->desired_pose.orientation.x,
+        goal->desired_pose.orientation.y, goal->desired_pose.orientation.z};
+    desired_quat.normalize();
+    Eigen::Quaterniond relative_quat = initial_quat.inverse() * desired_quat;
+    Eigen::AngleAxisd angle_axis_relative = Eigen::AngleAxisd{relative_quat};
+    double theta_f = angle_axis_relative.angle();
+    Eigen::Vector3d axis = angle_axis_relative.axis();
 
     auto feedback = std::make_shared<CartTraj::Feedback>();
     auto result = std::make_shared<CartTraj::Result>();
@@ -214,6 +214,7 @@ private:
       cmd_twist.linear.z = qintic_velocity(goal->initial_pose.position.z,
                                            goal->desired_pose.position.z,
                                            t.seconds(), goal->total_time);
+
       cmd_accel.linear.x = qintic_accel(goal->initial_pose.position.x,
                                         goal->desired_pose.position.x,
                                         t.seconds(), goal->total_time);

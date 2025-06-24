@@ -13,13 +13,14 @@ find_package(sensor_msgs REQUIRED)
 find_package(cv_bridge REQUIRED)
 find_package(image_transport REQUIRED)
 find_package(OpenCV REQUIRED)
+find_package(message_filters REQUIRED)
 
-add_executable(opencv_example ./examples/opencv_example.cpp)
-ament_target_dependencies(opencv_example rclcpp std_msgs sensor_msgs cv_bridge image_transport OpenCV)
+add_executable(image_saver ./examples/image_saver.cpp)
+ament_target_dependencies(image_saver rclcpp std_msgs sensor_msgs cv_bridge image_transport OpenCV message_filters)
 
 
 install(TARGETS
-  opencv_example
+  image_saver
   DESTINATION lib/${PROJECT_NAME}
 )
 

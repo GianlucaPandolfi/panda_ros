@@ -73,10 +73,22 @@ def generate_launch_description():
         description='Use fr3 real robot (set also robot ip)'
     )
 
+    use_franka_sim = DeclareLaunchArgument(
+        'use_franka_sim',
+        default_value='False',
+        description='Use panda real robot library (set also robot ip)'
+    )
+
     robot_ip = DeclareLaunchArgument(
         'robot_ip',
         default_value='192.168.1.0',
         description='fr3 robot ip'
+    )
+
+    alpha = DeclareLaunchArgument(
+        'alpha',
+        default_value='30.0',
+        description='Paramater used for computations of DLS jacobian based on sigma min'
     )
 
     pos_cmds_joints = Node(
@@ -143,9 +155,11 @@ def generate_launch_description():
             'Kp': LaunchConfiguration('controller_kp'),
             'Kd': LaunchConfiguration('controller_kd'),
             'Md': LaunchConfiguration('controller_md'),
+            'alpha': LaunchConfiguration('alpha'),
             'control_freq': LaunchConfiguration('controller_rate'),
             'clamp': LaunchConfiguration('clamp_effort_control'),
             'use_robot': LaunchConfiguration('use_robot'),
+            'use_franka_sim': LaunchConfiguration('use_franka_sim'),
             'robot_ip': LaunchConfiguration('robot_ip')
 
         }],
@@ -185,9 +199,11 @@ def generate_launch_description():
         loop_rate_freq,
         clamp_effort_control,
         use_robot,
+        use_franka_sim,
         robot_ip,
         clik_ts,
         clik_gamma,
+        alpha,
         effort_cmd_server,
         joint_traj_server,
         cart_traj_server,

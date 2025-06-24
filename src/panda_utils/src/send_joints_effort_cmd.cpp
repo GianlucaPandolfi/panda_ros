@@ -83,7 +83,7 @@ public:
             << panda_interface_names::panda_effort_cmd_topic_name);
 
     if (use_robot) {
-      timer = rclcpp::create_timer(this, this->get_clock(), 1ms,
+      timer = rclcpp::create_timer(this, this->get_clock(), 10us,
                                    send_joints_effort_robot);
       RCLCPP_INFO_STREAM(this->get_logger(),
                          "Created node "
@@ -93,7 +93,7 @@ public:
                                      : "system clock")
                              << " using real panda robot");
     } else {
-      timer = rclcpp::create_timer(this, this->get_clock(), 1ms,
+      timer = rclcpp::create_timer(this, this->get_clock(), 10us,
                                    send_joints_effort);
       RCLCPP_INFO_STREAM(this->get_logger(),
                          "Created node "

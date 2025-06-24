@@ -136,7 +136,22 @@ private:
   JointState::SharedPtr joint_state;
 
   void execute(const std::shared_ptr<GoalHandleTrajMove> goal_handle) {
-    rclcpp::Rate loop_rate(100.0);
+
+    if (realtime_tools::has_realtime_kernel()) {
+      if (!realtime_tools::configure_sched_fifo(98)) {
+        RCLCPP_WARN(this->get_logger(),
+                    "Execute thread: Could not set SCHED_FIFO."
+                    " Running with default scheduler.");
+      } else {
+        RCLCPP_INFO(this->get_logger(),
+                    "Execute thread: Set SCHED_FIFO priority.");
+      }
+    } else {
+      RCLCPP_WARN(this->get_logger(),
+                  "Execute thread: No real-time kernel detected.");
+    }
+
+    rclcpp::Rate loop_rate(1000.0);
     const auto goal = goal_handle->get_goal();
     auto feedback = std::make_shared<TrajMove::Feedback>();
     auto result = std::make_shared<TrajMove::Result>();

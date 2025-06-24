@@ -113,6 +113,7 @@ public:
     this->declare_parameter<double>("Kp", 50.0);
     this->declare_parameter<double>("Kd", 10.0);
     this->declare_parameter<double>("Md", 1.0);
+    this->declare_parameter<double>("alpha", 30.0);
     this->declare_parameter<double>("lambda", 1e-2);
     this->declare_parameter<double>("control_freq", 1000.0);
     this->declare_parameter<bool>("clamp", true);
@@ -371,7 +372,16 @@ public:
     // Wait for desired pose
     // WARN: should check if pose is reachable
     std::thread([this]() -> void {
-      wait_for_pose();
+      // wait_for_pose();
+
+      Eigen::VectorXd current_joints_config_vec;
+      current_joints_config_vec.resize(current_joint_config->position.size());
+      for (size_t i = 0; i < current_joint_config->position.size(); i++) {
+        current_joints_config_vec[i] = current_joint_config->position[i];
+      }
+      panda.computeAll(current_joints_config_vec,
+                       Eigen::Vector<double, 7>::Zero());
+      desired_pose = std::make_shared<Pose>(panda.getPose(frame_id_name));
 
       if (use_robot) {
         start_flag.store(true);
@@ -571,10 +581,7 @@ void ImpedanceController::control() {
           << desired_pose->orientation.z << "]");
 
   // Coefficient for dynamic lambda damping
-  double epsilon = 1e-1;
-  double k_max = 0.7;
-  double alpha = 30.0;
-  
+  double alpha = this->get_parameter("alpha").as_double();
 
   Eigen::Vector<double, 6> KP_{Kp, Kp, Kp, Kp, Kp, Kp};
   Eigen::Matrix<double, 6, 6> KP = Eigen::Matrix<double, 6, 6>::Identity();
@@ -610,16 +617,10 @@ void ImpedanceController::control() {
     // RCLCPP_INFO(this->get_logger(), "Computed terms");
     panda.computeAll(current_joints_config_vec, current_joints_speed);
 
-    // double current_joints_config_doubles[7];
-    // for (size_t i = 0; i < 7; i++) {
-    //   current_joints_config_doubles[i] = current_joint_config->position[i];
-    // }
-
     panda.computeAll(current_joints_config_vec, current_joints_speed);
 
     // Get current pose
     Pose current_pose_tmp = panda.getPose(frame_id_name);
-    // Pose current_pose_tmp = panda_mine.pose(current_joints_config_doubles);
     Eigen::Quaterniond current_quat{};
     current_quat.w() = current_pose_tmp.orientation.w;
     current_quat.x() = current_pose_tmp.orientation.x;
@@ -675,8 +676,6 @@ void ImpedanceController::control() {
     //
     Eigen::Matrix<double, 6, 7> jacobian =
         panda.getGeometricalJacobian(frame_id_name);
-    // Eigen::Matrix<double, 6, 7> jacobian =
-    //     panda_mine.geometrical_jacobian(current_joints_config_doubles);
 
     // Calculate jacobian SVD
     Eigen::JacobiSVD<Eigen::MatrixXd> svd(jacobian, Eigen::ComputeThinU |
@@ -697,15 +696,20 @@ void ImpedanceController::control() {
     //                  lambda * Eigen::Matrix<double, 6, 6>::Identity())
     //                     .inverse();
 
-    // DYNAMIC LAMBDA BASED ON CONDITION NUMBER
-    // double lambda = sigma_min <= epsilon
-    //                     ? k_max * (pow(sigma_min, 2) / pow(epsilon, 2))
-    //                     : 0.0;
+    // DYNAMIC LAMBDA BASED ON MINIMUM SINGULAR VALUE
     double lambda = std::exp(-alpha * sigma_min);
     jacobian_pinv = jacobian.transpose() *
                     (jacobian * jacobian.transpose() +
                      lambda * Eigen::Matrix<double, 6, 6>::Identity())
                         .inverse();
+
+    // auto J_cap = mass_matrix.inverse() * jacobian.transpose() *
+    //              (jacobian * mass_matrix.inverse() * jacobian.transpose() +
+    //               lambda * Eigen::Matrix<double, 6, 6>::Identity());
+    //
+    // Eigen::Matrix<double, 7, 7> tau_projector =
+    //     Eigen::Matrix<double, 7, 7>::Identity() -
+    //     jacobian.transpose() * J_cap.transpose();
 
     // Calculate J_dot * q_dot
     auto current_twist = jacobian * current_joints_speed;
@@ -713,14 +717,13 @@ void ImpedanceController::control() {
 
     // RCLCPP_INFO(this->get_logger(), "Calculating control");
     if (compliance_mode.load()) {
-      y = jacobian_pinv * (1 / Md) *
+      y = jacobian_pinv * MD_1 *
           (
 
-              Md * desired_accel_vec +
-              KD * (desired_twist_vec - jacobian * current_joints_speed)
-              // - panda.computeHessianTimesQDot(current_joints_config_vec,
-              //                                     current_joints_speed,
-              //                                     frame_id_name)
+              MD * desired_accel_vec +
+              KD * (desired_twist_vec - jacobian * current_joints_speed) -
+              panda.computeHessianTimesQDot(current_joints_config_vec,
+                                            current_joints_speed, frame_id_name)
 
           );
     } else {

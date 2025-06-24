@@ -37,8 +37,10 @@
 #include <franka/model.h>
 #include <franka/robot.h>
 #include <memory>
+#include <mutex>
 #include <rcl/time.h>
 #include <rclcpp/clock.hpp>
+#include <rclcpp/duration.hpp>
 #include <rclcpp/logger.hpp>
 #include <rclcpp/logging.hpp>
 #include <rclcpp/rate.hpp>
@@ -66,22 +68,25 @@ auto DEFAULT_URDF_PATH =
     ament_index_cpp::get_package_share_directory("panda_world") +
     panda_constants::panda_model_effort;
 
+struct debug_data {
+  std::mutex mut;
+  bool has_data;
+  std::array<double, 7> tau_d_last;
+  franka::RobotState robot_state;
+  std::array<double, 7> gravity;
+};
+
 geometry_msgs::msg::Pose
 convertMatrixToPose(const std::array<double, 16> &tf_matrix) {
-  // Step 1: Map the array to an Eigen 4x4 matrix (column-major)
   Eigen::Matrix4d T = Eigen::Map<const Eigen::Matrix4d>(tf_matrix.data());
 
-  // Step 2: Extract translation (last column)
   Eigen::Vector3d translation = T.block<3, 1>(0, 3);
 
-  // Step 3: Extract rotation matrix
   Eigen::Matrix3d rotation = T.block<3, 3>(0, 0);
 
-  // Step 4: Convert to quaternion
   Eigen::Quaterniond quat(rotation);
-  quat.normalize(); // Safety
+  quat.normalize();
 
-  // Step 5: Fill geometry_msgs::msg::Pose
   geometry_msgs::msg::Pose pose_msg;
   pose_msg.position.x = translation.x();
   pose_msg.position.y = translation.y();
@@ -112,6 +117,7 @@ public:
     this->declare_parameter<bool>("clamp", true);
     this->declare_parameter<std::string>("robot_ip", "192.168.1.0");
     this->declare_parameter<bool>("use_robot", false);
+    this->declare_parameter<bool>("use_franka_sim", false);
 
     // Get parameters
     Kp = this->get_parameter("Kp").as_double();
@@ -121,12 +127,19 @@ public:
         this->get_parameter("control_freq").as_double(), this->get_clock());
     clamp = this->get_parameter("clamp").as_bool();
     use_robot = this->get_parameter("use_robot").as_bool();
+    use_franka_sim = this->get_parameter("use_franka_sim").as_bool();
 
     if (use_robot) {
       panda_franka = franka::Robot(this->get_parameter("robot_ip").as_string());
       RCLCPP_INFO_STREAM(this->get_logger(),
                          "Connected to robot with ip "
                              << this->get_parameter("robot_ip").as_string());
+      double load = 0.553455;
+      std::array F_x_Cload{-0.010328, 0.000068, 0.148159};
+      std::array load_inertia{0.02001,        0.000006527121, -0.0004590,
+                              0.000006527121, 0.01936,        0.000003371038,
+                              -0.0004590,     0.000003371038, 0.002245};
+      panda_franka->setLoad(load, F_x_Cload, load_inertia);
     }
 
     // Taking joint limits
@@ -167,6 +180,7 @@ public:
         Eigen::Vector<double, 7>{15.0, 7.5, 10.0, 12.5, 15.0, 20.0, 20.0};
 
     auto set_joint_state = [this](const JointState::SharedPtr msg) {
+      std::lock_guard<std::mutex> lock(joint_state_mutex);
       current_joint_config = msg;
     };
 
@@ -187,6 +201,7 @@ public:
 
     auto set_desired_joints_command =
         [this](const JointsCommand::SharedPtr msg) {
+          std::lock_guard<std::mutex> lock(desired_cmd_mutex);
           RCLCPP_DEBUG_STREAM(this->get_logger(), "Received joint command");
 
           desired_joints_position.resize(msg->positions.size());
@@ -330,6 +345,20 @@ public:
 
     T_0_b = pinocchio::SE3{orientation.toRotationMatrix(), translation};
 
+    if (use_franka_sim) {
+      RCLCPP_INFO(this->get_logger(),
+                  "Started controller with libfranka model to load");
+      // Not setting real time prioriry when required
+      franka::Robot robot =
+          franka::Robot(this->get_parameter("robot_ip").as_string(),
+                        franka::RealtimeConfig::kIgnore);
+      RCLCPP_INFO_STREAM(this->get_logger(),
+                         "Connected to robot with ip "
+                             << this->get_parameter("robot_ip").as_string());
+      panda_franka_model = robot.loadModel();
+      RCLCPP_INFO(this->get_logger(), "Loaded robot model library");
+    }
+
     if (use_robot) {
       panda_franka_model = panda_franka.value().loadModel();
       joint_state_to_pub.position.resize(7);
@@ -353,9 +382,6 @@ public:
           // Send last commanded joint effort command
           return franka::MotionFinished(franka::Torques(state.tau_J_d));
         }
-
-        // Publish current pose and joint state
-        publish_robot_state_libfranka(state);
 
         // Get q and q_dot
         //
@@ -398,7 +424,7 @@ public:
         }
 
         // Inverse dynamics torque commanded
-        Eigen::VectorXd control_input_vec = mass_matrix * y + coriolis;
+        Eigen::Vector<double, 7> control_input_vec = mass_matrix * y + coriolis;
 
         // Clamping control input
         // Torque limits for fr3 indicated by libfranka lib
@@ -427,6 +453,16 @@ public:
         for (size_t i = 0; i < 7; ++i) {
           tau[i] = control_input_vec[i];
         }
+
+        // Fill struct for debug prints
+        if (print_debug.mut.try_lock()) {
+          print_debug.has_data = true;
+          print_debug.robot_state = state;
+          print_debug.tau_d_last = tau;
+          print_debug.gravity = panda_franka_model.value().gravity(state);
+          print_debug.mut.unlock();
+        }
+
         return franka::Torques(tau);
       };
     }
@@ -447,9 +483,6 @@ public:
     desired_joints_accelerations.resize(panda.getModel().nq);
     desired_joints_accelerations.setZero();
 
-    // Initial config
-    desired_joints_position[6] = 1.0;
-
     clamp_joint_config();
 
     last_control_input.resize(panda.getModel().nq);
@@ -461,6 +494,13 @@ public:
     }
 
     if (use_robot) {
+
+      franka::RobotState initial_state = panda_franka->readOnce();
+      for (size_t i = 0; i < 7; i++) {
+        desired_joints_position[i] = initial_state.q[i];
+      }
+      RCLCPP_INFO(this->get_logger(), "Set initial state with real time robot");
+
       start_flag.store(true);
       if (!realtime_tools::has_realtime_kernel()) {
         RCLCPP_ERROR(this->get_logger(),
@@ -483,6 +523,86 @@ public:
         try {
           RCLCPP_INFO_STREAM(this->get_logger(),
                              "Starting control thread with real time robot");
+          std::thread{[this]() {
+            JointsEffort cmd;
+            JointsPos pos;
+            using namespace std::chrono_literals;
+            RCLCPP_INFO(this->get_logger(), "Started print control thread");
+            while (start_flag.load()) {
+              std::this_thread::sleep_for(1ms);
+              if (this->print_debug.mut.try_lock()) {
+                if (print_debug.has_data) {
+
+                  // Publish current pose and joint state
+                  publish_robot_state_libfranka(print_debug.robot_state);
+
+                  cmd.header.stamp = this->now();
+                  pos.header.stamp = this->now();
+                  for (int i = 0; i < 7; i++) {
+                    cmd.effort_values[i] = print_debug.tau_d_last[i];
+                  }
+                  robot_joint_efforts_pub_debug->publish(cmd);
+
+                  for (int i = 0; i < 7; i++) {
+                    cmd.effort_values[i] = print_debug.gravity[i];
+                  }
+                  gravity_contribute_debug->publish(cmd);
+
+                  // for (int i = 0; i < y.size(); i++) {
+                  //   cmd.effort_values[i] = y[i];
+                  // }
+                  // y_contribute_debug->publish(cmd);
+
+                  // for (int i = 0; i < y.size(); i++) {
+                  //   cmd.effort_values[i] = y_accel[i];
+                  // }
+                  // y_desired_accel_debug->publish(cmd);
+
+                  for (int i = 0; i < 7; i++) {
+                    pos.joint_values[i] = desired_joints_position[i] -
+                                          print_debug.robot_state.q[i];
+                  }
+                  position_error_debug->publish(pos);
+
+                  for (int i = 0; i < 7; i++) {
+                    pos.joint_values[i] = desired_joints_velocity[i] -
+                                          print_debug.robot_state.dq[i];
+                  }
+                  velocity_error_debug->publish(pos);
+
+                  for (int i = 0; i < 7; i++) {
+                    pos.joint_values[i] = print_debug.robot_state.q[i];
+                  }
+                  current_position_debug->publish(pos);
+
+                  for (int i = 0; i < 7; i++) {
+                    pos.joint_values[i] = print_debug.robot_state.dq[i];
+                  }
+                  current_velocity_debug->publish(pos);
+
+                  for (int i = 0; i < 7; i++) {
+                    pos.joint_values[i] = desired_joints_position[i];
+                  }
+                  desired_position_debug->publish(pos);
+
+                  for (int i = 0; i < 7; i++) {
+                    pos.joint_values[i] = desired_joints_velocity[i];
+                  }
+                  desired_velocity_debug->publish(pos);
+
+                  for (int i = 0; i < 7; i++) {
+                    pos.joint_values[i] = desired_joints_accelerations[i];
+                  }
+                  desired_acceleration_debug->publish(pos);
+
+                  print_debug.has_data = false;
+                }
+
+                print_debug.mut.unlock();
+              }
+            }
+            RCLCPP_INFO(this->get_logger(), "Shutdown print control thread");
+          }}.detach();
           // control function says "sets realtime priority for the current
           // thread"
           panda_franka->control(robot_control_callback);
@@ -498,10 +618,18 @@ public:
     } else {
       // Start control loop thread
       start_flag.store(true);
-      control_thread =
-          std::thread{std::bind(&InverseDynamicsController::control, this)};
-      RCLCPP_INFO(this->get_logger(),
-                  "Started control thread with simulated robot");
+      if (use_franka_sim) {
+        control_thread = std::thread{
+            std::bind(&InverseDynamicsController::control_libfranka_sim, this)};
+        RCLCPP_INFO(this->get_logger(), "Started control thread with simulated "
+                                        "robot and libfranka model lib");
+      } else {
+
+        control_thread =
+            std::thread{std::bind(&InverseDynamicsController::control, this)};
+        RCLCPP_INFO(this->get_logger(),
+                    "Started control thread with simulated robot");
+      }
 
       return CallbackReturn::SUCCESS;
     }
@@ -569,12 +697,16 @@ private:
   std::optional<franka::Robot> panda_franka;
   std::optional<franka::Model> panda_franka_model;
   bool use_robot;
+  bool use_franka_sim;
   JointState::SharedPtr current_joint_config{nullptr};
+  std::mutex joint_state_mutex;
   JointState joint_state_to_pub{};
   JointTorqueMeasureStamped::SharedPtr current_measured_joint_torques{nullptr};
+  debug_data print_debug;
   std::function<franka::Torques(const franka::RobotState &, franka::Duration)>
       robot_control_callback;
 
+  std::mutex desired_cmd_mutex;
   Eigen::VectorXd desired_joints_position;
   Eigen::VectorXd desired_joints_velocity;
   Eigen::VectorXd desired_joints_accelerations;
@@ -610,8 +742,9 @@ private:
     robot_joint_efforts_pub->publish(efforts_cmd);
   }
   void control();
+  void control_libfranka_sim();
 
-  void clamp_control(Eigen::VectorXd &control_input) {
+  void clamp_control(Eigen::Vector<double, 7> &control_input) {
 
     for (int i = 0; i < control_input.size(); i++) {
       if (control_input[i] > effort_limits[i]) {
@@ -718,10 +851,16 @@ void InverseDynamicsController::control() {
   //
   //
 
-  Eigen::VectorXd non_linear_effects;
-  Eigen::VectorXd gravity;
-  Eigen::VectorXd control_input;
-  Eigen::VectorXd y;
+  Eigen::Vector<double, 7> non_linear_effects;
+  Eigen::Vector<double, 7> gravity;
+  Eigen::Vector<double, 7> control_input;
+  Eigen::Vector<double, 7> y;
+  Eigen::Vector<double, 7> err_pos;
+  Eigen::Vector<double, 7> err_vel;
+  Eigen::Matrix<double, 7, 7> mass_matrix;
+  Eigen::Vector<double, 7> y_accel;
+  Eigen::Vector<double, 7> current_joints_config_vec;
+  Eigen::Vector<double, 7> current_joints_speed;
 
   JointsEffort cmd;
   JointsPos pos;
@@ -737,8 +876,17 @@ void InverseDynamicsController::control() {
   Eigen::Matrix<double, 7, 7> KD = Eigen::Matrix<double, 7, 7>::Identity();
   KD.diagonal() = KD_;
 
-  rclcpp::Time last_control_cycle = rclcpp::Time{0};
+  // RCLCPP_INFO(this->get_logger(), "Waiting for simulation to start");
+  // rclcpp::Time last_control_cycle = this->now();
+  // while (rclcpp::Time{current_joint_config->header.stamp} - this->now() ==
+  //        rclcpp::Duration{0, 0}) {
+  // }
+  // for (size_t i = 0; i < 7; i++) {
+  //   desired_joints_position[i] = current_joint_config->position[i];
+  // }
 
+  desired_joints_position.setZero();
+  // clamp_joint_config();
   RCLCPP_INFO_STREAM(
       this->get_logger(),
       "Current desired config at initial loop: ["
@@ -754,25 +902,19 @@ void InverseDynamicsController::control() {
 
     // Update robot model
     //
-    // Eigen::VectorXd current_joints_config_vec =
-    //     Eigen::VectorXd::Map(current_joint_config->position.data(),
-    //                          current_joint_config->position.size());
 
-    Eigen::VectorXd current_joints_config_vec;
-    current_joints_config_vec.resize(current_joint_config->position.size());
-    for (size_t i = 0; i < current_joint_config->position.size(); i++) {
-      current_joints_config_vec[i] = current_joint_config->position[i];
+    {
+      std::lock_guard<std::mutex> lock(joint_state_mutex);
+
+      for (size_t i = 0; i < current_joint_config->position.size(); i++) {
+        current_joints_config_vec[i] = current_joint_config->position[i];
+      }
+
+      for (size_t i = 0; i < current_joint_config->position.size(); i++) {
+        current_joints_speed[i] = current_joint_config->velocity[i];
+      }
     }
 
-    // Eigen::VectorXd current_joints_speed =
-    //     Eigen::VectorXd::Map(current_joint_config->velocity.data(),
-    //                          current_joint_config->velocity.size());
-
-    Eigen::VectorXd current_joints_speed;
-    current_joints_speed.resize(current_joint_config->position.size());
-    for (size_t i = 0; i < current_joint_config->position.size(); i++) {
-      current_joints_speed[i] = current_joint_config->velocity[i];
-    }
     panda.computeAll(current_joints_config_vec, current_joints_speed);
 
     // Calculate quantities for control
@@ -783,23 +925,252 @@ void InverseDynamicsController::control() {
                                                    current_joints_speed);
     gravity = panda.getGravityVector(current_joints_config_vec);
 
-    auto err_pos = desired_joints_position - current_joints_config_vec;
-    auto err_vel = desired_joints_velocity - current_joints_speed;
-    auto mass_matrix = panda.getMassMatrix(current_joints_config_vec);
-    auto y_accel = mass_matrix * Md * desired_joints_accelerations;
+    {
+      std::lock_guard<std::mutex> lock(desired_cmd_mutex);
+      err_pos = desired_joints_position - current_joints_config_vec;
+      err_vel = desired_joints_velocity - current_joints_speed;
+      mass_matrix = panda.getMassMatrix(current_joints_config_vec);
+      y_accel = mass_matrix * Md * desired_joints_accelerations;
 
-    if (compliance_mode.load()) {
-      y = Md * desired_joints_accelerations +
-          KD * (desired_joints_velocity - current_joints_speed);
-    } else {
-      y = Md * desired_joints_accelerations + KD * (err_vel) + KP * (err_pos);
+      if (compliance_mode.load()) {
+        y = Md * desired_joints_accelerations +
+            KD * (desired_joints_velocity - current_joints_speed);
+      } else {
+        y = Md * desired_joints_accelerations + KD * (err_vel) + KP * (err_pos);
+      }
     }
 
     // Consider control input without the gravitational contribute
     control_input = mass_matrix * y + non_linear_effects - gravity;
 
+    // Clamping control input
+    //
+    // WARN: This section has to clamp the control signal WITHOUT the gravity
+    // (and motor friction) contributions as per libfranka library logic on
+    // commanded torque.
+    if (clamp) {
+      // clamp_control_speed(control_input,
+      //                     (control_loop_rate->period().count() * 1e-9));
+      clamp_control(control_input);
+    }
+
+    // Apply control
+    //
+    RCLCPP_DEBUG_STREAM(this->get_logger(), control_input);
+    // Re-sum the gravitational effort contribute
+    // publish_efforts(control_input + gravity);
     // RCLCPP_INFO_STREAM(this->get_logger(),
-    //                    panda.getMassMatrix(current_joints_config_vec).row(1));
+    //                    "Seconds from last control published: "
+    //                        << (this->now() - last_control_cycle).seconds());
+    // last_control_cycle = this->now();
+
+    cmd.header.stamp = this->now();
+
+    for (int i = 0; i < control_input.size(); i++) {
+      cmd.effort_values[i] = control_input[i];
+    }
+    robot_joint_efforts_pub_debug->publish(cmd);
+
+    for (int i = 0; i < gravity.size(); i++) {
+      cmd.effort_values[i] = gravity[i];
+    }
+    gravity_contribute_debug->publish(cmd);
+
+    for (int i = 0; i < y.size(); i++) {
+      cmd.effort_values[i] = y[i];
+    }
+    y_contribute_debug->publish(cmd);
+
+    for (int i = 0; i < y.size(); i++) {
+      cmd.effort_values[i] = y_accel[i];
+    }
+    y_desired_accel_debug->publish(cmd);
+
+    for (int i = 0; i < err_pos.size(); i++) {
+      pos.joint_values[i] = err_pos[i];
+    }
+    position_error_debug->publish(pos);
+
+    for (int i = 0; i < err_pos.size(); i++) {
+      pos.joint_values[i] = err_vel[i];
+    }
+    velocity_error_debug->publish(pos);
+
+    for (int i = 0; i < err_pos.size(); i++) {
+      pos.joint_values[i] = current_joints_config_vec[i];
+    }
+    current_position_debug->publish(pos);
+
+    for (int i = 0; i < err_pos.size(); i++) {
+      pos.joint_values[i] = current_joints_speed[i];
+    }
+    current_velocity_debug->publish(pos);
+
+    for (int i = 0; i < err_pos.size(); i++) {
+      pos.joint_values[i] = desired_joints_position[i];
+    }
+    desired_position_debug->publish(pos);
+
+    for (int i = 0; i < err_pos.size(); i++) {
+      pos.joint_values[i] = desired_joints_velocity[i];
+    }
+    desired_velocity_debug->publish(pos);
+
+    for (int i = 0; i < err_pos.size(); i++) {
+      pos.joint_values[i] = desired_joints_accelerations[i];
+    }
+    desired_acceleration_debug->publish(pos);
+
+    mass.data = panda.getMassMatrix(current_joints_config_vec).norm();
+    mass_matrix_val_debug->publish(mass);
+
+    // Save last control input without the gravitational contribute
+    //
+    last_control_input = control_input;
+
+    // Print current pose to topic
+    geometry_msgs::msg::PoseStamped current_pose;
+    current_pose.pose = panda.getPose(frame_id_name);
+    current_pose.header.stamp = this->now();
+    robot_pose_pub->tryPublish(current_pose);
+
+    // Sleep
+    //
+    control_loop_rate->sleep();
+  }
+
+  if (!rclcpp::ok()) {
+    RCLCPP_INFO(this->get_logger(), "Requested shutdown");
+    return;
+  }
+}
+
+void InverseDynamicsController::control_libfranka_sim() {
+  // Inverse dynamics controller
+  //
+  //
+
+  Eigen::Vector<double, 7> non_linear_effects;
+  Eigen::Vector<double, 7> gravity;
+  Eigen::Vector<double, 7> control_input;
+  Eigen::Vector<double, 7> y;
+  Eigen::Vector<double, 7> err_pos;
+  Eigen::Vector<double, 7> err_vel;
+  Eigen::Matrix<double, 7, 7> mass_matrix;
+  Eigen::Vector<double, 7> y_accel;
+  Eigen::Vector<double, 7> current_joints_config_vec;
+  Eigen::Vector<double, 7> current_joints_speed;
+  franka::RobotState state;
+
+  JointsEffort cmd;
+  JointsPos pos;
+  std_msgs::msg::Float64 mass;
+
+  Eigen::Vector<double, 7> KP_{Kp, Kp, Kp, Kp, Kp * 3, Kp * 3, Kp * 4};
+  // Eigen::Vector<double, 7> KP_{Kp, Kp, Kp, Kp, Kp, Kp, Kp};
+  Eigen::Matrix<double, 7, 7> KP = Eigen::Matrix<double, 7, 7>::Identity();
+  KP.diagonal() = KP_;
+
+  Eigen::Vector<double, 7> KD_{Kd, Kd, Kd, Kd, Kd * 3, Kd * 3, Kd * 4};
+  // Eigen::Vector<double, 7> KD_{Kd, Kd, Kd, Kd, Kd, Kd, Kd};
+  Eigen::Matrix<double, 7, 7> KD = Eigen::Matrix<double, 7, 7>::Identity();
+  KD.diagonal() = KD_;
+
+  rclcpp::Time last_control_cycle = this->now();
+
+  // Franka panda joint config with real robot
+  // franka::RobotState initial_state = panda_franka->readOnce();
+  // for (size_t i = 0; i < 7; i++) {
+  //   desired_joints_position[i] = initial_state.q[i];
+  // }
+  
+  RCLCPP_INFO(this->get_logger(), "Waiting for simulation to start");
+  while (rclcpp::Time{current_joint_config->header.stamp} - this->now() ==
+         rclcpp::Duration{0, 0}) {
+  }
+  for (size_t i = 0; i < 7; i++) {
+    desired_joints_position[i] = current_joint_config->position[i];
+  }
+  clamp_joint_config();
+
+  RCLCPP_INFO_STREAM(
+      this->get_logger(),
+      "Current desired config at initial loop is the current configuration: ["
+          << desired_joints_position[0] << ", " << desired_joints_position[1]
+          << ", " << desired_joints_position[2] << ", "
+          << desired_joints_position[3] << ", " << desired_joints_position[4]
+          << ", " << desired_joints_position[5] << ", "
+          << desired_joints_position[6] << "]");
+
+  while (start_flag.load() && rclcpp::ok()) {
+
+    pos.header.stamp = this->now();
+
+    // Update robot model
+    //
+
+    {
+      std::lock_guard<std::mutex> lock(joint_state_mutex);
+
+      // Update franka robot state
+      for (size_t i = 0; i < current_joint_config->position.size(); i++) {
+        current_joints_config_vec[i] = current_joint_config->position[i];
+        state.q[i] = current_joint_config->position[i];
+      }
+
+      for (size_t i = 0; i < current_joint_config->position.size(); i++) {
+        current_joints_speed[i] = current_joint_config->velocity[i];
+        state.dq[i] = current_joint_config->velocity[i];
+      }
+    }
+
+    // Calculate quantities for control
+    //
+
+    // Eigen::Map<const Eigen::Matrix<double, 7, 7>> mass_matrix(
+    //     this->panda_franka_model.value().mass(state).data());
+    std::array<double, 49> mass_matrix_raw =
+        this->panda_franka_model.value().mass(state);
+    Eigen::Matrix<double, 7, 7> mass_matrix;
+    for (size_t i = 0; i < 7; i++) {
+      for (size_t j = 0; j < 7; j++) {
+        mass_matrix(j, i) = mass_matrix_raw[i * 7 + j];
+      }
+    }
+
+    // Eigen::Map<const Eigen::Matrix<double, 7, 1>> coriolis(
+    //     this->panda_franka_model.value().coriolis(state).data());
+    std::array<double, 7> coriolis_raw =
+        this->panda_franka_model.value().coriolis(state);
+    Eigen::Vector<double, 7> coriolis;
+    for (size_t i = 0; i < 7; i++) {
+      coriolis(i) = coriolis_raw[i];
+    }
+
+    // Eigen::Map<const Eigen::Matrix<double, 7, 1>> gravity(
+    //     this->panda_franka_model.value().gravity(state).data());
+    std::array<double, 7> gravity_raw =
+        this->panda_franka_model.value().gravity(state);
+    for (size_t i = 0; i < 7; i++) {
+      gravity(i) = gravity_raw[i];
+    }
+
+    {
+      std::lock_guard<std::mutex> lock(desired_cmd_mutex);
+      err_pos = desired_joints_position - current_joints_config_vec;
+      err_vel = desired_joints_velocity - current_joints_speed;
+      y_accel = mass_matrix * Md * desired_joints_accelerations;
+
+      if (compliance_mode.load()) {
+        y = Md * desired_joints_accelerations +
+            KD * (desired_joints_velocity - current_joints_speed);
+      } else {
+        y = Md * desired_joints_accelerations + KD * (err_vel) + KP * (err_pos);
+      }
+    }
+
+    // Consider control input without the gravitational contribute
+    control_input = mass_matrix * y + coriolis;
 
     // Clamping control input
     //
@@ -817,6 +1188,10 @@ void InverseDynamicsController::control() {
     RCLCPP_DEBUG_STREAM(this->get_logger(), control_input);
     // Re-sum the gravitational effort contribute
     publish_efforts(control_input + gravity);
+    // RCLCPP_INFO_STREAM(this->get_logger(),
+    //                    "Seconds from last control published: "
+    //                        << (this->now() - last_control_cycle).seconds());
+    // last_control_cycle = this->now();
 
     cmd.header.stamp = this->now();
 
