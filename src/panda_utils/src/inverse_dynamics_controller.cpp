@@ -117,14 +117,14 @@ public:
     this->declare_parameter<bool>("clamp", true);
     this->declare_parameter<std::string>("robot_ip", "192.168.1.0");
     this->declare_parameter<bool>("use_robot", false);
-    this->declare_parameter<bool>("use_franka_sim", false);
+    this->declare_parameter<bool>("use_franka_sim", true);
 
     // Get parameters
     Kp = this->get_parameter("Kp").as_double();
     Kd = this->get_parameter("Kd").as_double();
     Md = this->get_parameter("Md").as_double();
     control_loop_rate = std::make_shared<rclcpp::Rate>(
-        this->get_parameter("control_freq").as_double(), this->get_clock());
+        this->get_parameter("control_freq").as_double());
     clamp = this->get_parameter("clamp").as_bool();
     use_robot = this->get_parameter("use_robot").as_bool();
     use_franka_sim = this->get_parameter("use_franka_sim").as_bool();
@@ -315,15 +315,33 @@ public:
       start_flag.store(false);
       control_thread.join();
     }
+    if (panda_franka.has_value()) {
+      try {
+        panda_franka.value().stop();
+        RCLCPP_INFO(this->get_logger(), "Stopped robot");
+      } catch (const franka::Exception &e) {
+        RCLCPP_ERROR_STREAM(this->get_logger(),
+                            "Error stopping robot: " << e.what());
+      }
+    }
   }
 
   CallbackReturn on_configure(const rclcpp_lifecycle::State &) override {
+
+    // Resizing desired command vectors
+    desired_joints_position.resize(panda.getModel().nq);
+    desired_joints_position.setZero();
+    desired_joints_velocity.resize(panda.getModel().nq);
+    desired_joints_velocity.setZero();
+    desired_joints_accelerations.resize(panda.getModel().nq);
+    desired_joints_accelerations.setZero();
+
 
     Kp = this->get_parameter("Kp").as_double();
     Kd = this->get_parameter("Kd").as_double();
     Md = this->get_parameter("Md").as_double();
     control_loop_rate = std::make_shared<rclcpp::Rate>(
-        this->get_parameter("control_freq").as_double(), this->get_clock());
+        this->get_parameter("control_freq").as_double());
     clamp = this->get_parameter("clamp").as_bool();
 
     RCLCPP_INFO_STREAM(
@@ -332,10 +350,6 @@ public:
             << this->get_name() << " using "
             << (this->get_clock()->ros_time_is_active() ? "simulation clock"
                                                         : "system clock")
-            << " and rate clock "
-            << (this->control_loop_rate->get_type() == RCL_ROS_TIME
-                    ? "simulation clock"
-                    : "system clock")
             << ", and control loop rate (Hz) "
             << 1.0 / (control_loop_rate->period().count() * 1e-9)
             << " with Kp = " << Kp << ",Kd = " << Kd << " and Md = " << Md);
@@ -357,6 +371,24 @@ public:
                              << this->get_parameter("robot_ip").as_string());
       panda_franka_model = robot.loadModel();
       RCLCPP_INFO(this->get_logger(), "Loaded robot model library");
+      try {
+           franka::RobotState initial_state = robot.readOnce();
+            for (size_t i = 0; i < 7; i++) {
+              desired_joints_position[i] = initial_state.q[i];
+            }
+            RCLCPP_INFO_STREAM(this->get_logger(), "Current desired configuration: [" << desired_joints_position[0] << ", "
+                         << desired_joints_position[1] << ", "
+                         << desired_joints_position[2] << ", "
+                         << desired_joints_position[3] << ", "
+                         << desired_joints_position[4] << ", "
+                         << desired_joints_position[5] << ", "
+                         << desired_joints_position[6] << "]");
+      } catch (const franka::Exception &e) {
+        RCLCPP_ERROR_STREAM(this->get_logger(),
+                            "Error reading initial state: " << e.what());
+        return CallbackReturn::FAILURE;
+      }
+      
     }
 
     if (use_robot) {
@@ -364,6 +396,7 @@ public:
       joint_state_to_pub.position.resize(7);
       joint_state_to_pub.velocity.resize(7);
       joint_state_to_pub.effort.resize(7);
+      joint_state_to_pub.name = panda_interface_names::panda_joint_names; // Joint names from model
 
       Eigen::Vector<double, 7> KP_{Kp, Kp, Kp, Kp, Kp, Kp, Kp};
       // Eigen::Vector<double, 7> KP_{Kp, Kp, Kp, Kp, Kp * 3, Kp * 3, Kp * 4};
@@ -478,6 +511,8 @@ public:
 
         return franka::Torques(tau);
       };
+      RCLCPP_INFO(this->get_logger(),
+                  "Set robot control callback with libfranka lib");
     }
 
     return CallbackReturn::SUCCESS;
@@ -514,7 +549,14 @@ public:
       for (size_t i = 0; i < 7; i++) {
         desired_joints_position[i] = initial_state.q[i];
       }
-      RCLCPP_INFO(this->get_logger(), "Set initial state with real time robot");
+      RCLCPP_INFO_STREAM(this->get_logger(), "Set initial state with real time robot corresponing to: ["
+                                                 << desired_joints_position[0] << ", "
+                                                 << desired_joints_position[1] << ", "
+                                                 << desired_joints_position[2] << ", "
+                                                 << desired_joints_position[3] << ", "
+                                                 << desired_joints_position[4] << ", "
+                                                 << desired_joints_position[5] << ", "
+                                                 << desired_joints_position[6] << "]");
 
       start_flag.store(true);
       if (!realtime_tools::has_realtime_kernel()) {
@@ -562,16 +604,6 @@ public:
                     cmd.effort_values[i] = print_debug.gravity[i];
                   }
                   gravity_contribute_debug->publish(cmd);
-
-                  // for (int i = 0; i < y.size(); i++) {
-                  //   cmd.effort_values[i] = y[i];
-                  // }
-                  // y_contribute_debug->publish(cmd);
-
-                  // for (int i = 0; i < y.size(); i++) {
-                  //   cmd.effort_values[i] = y_accel[i];
-                  // }
-                  // y_desired_accel_debug->publish(cmd);
 
                   for (int i = 0; i < 7; i++) {
                     pos.joint_values[i] = desired_joints_position[i] -
@@ -655,6 +687,15 @@ public:
     RCLCPP_INFO(get_logger(), "Deactivating...");
     // Stop thread and join it
     start_flag.store(false);
+    if (panda_franka.has_value()) {
+      try {
+        panda_franka.value().stop();
+        RCLCPP_INFO(this->get_logger(), "Stopped robot");
+      } catch (const franka::Exception &e) {
+        RCLCPP_ERROR_STREAM(this->get_logger(),
+                            "Error stopping robot: " << e.what());
+      }
+    }
     if (control_thread.joinable()) {
       control_thread.join();
     }
@@ -670,6 +711,15 @@ public:
     RCLCPP_INFO(get_logger(), "Shutting down...");
     // Stop thread and join it
     start_flag.store(false);
+     if (panda_franka.has_value()) {
+      try {
+        panda_franka.value().stop();
+        RCLCPP_INFO(this->get_logger(), "Stopped robot");
+      } catch (const franka::Exception &e) {
+        RCLCPP_ERROR_STREAM(this->get_logger(),
+                            "Error stopping robot: " << e.what());
+      }
+    }
     if (control_thread.joinable()) {
       control_thread.join();
     }
@@ -854,8 +904,8 @@ private:
     joint_state_to_pub.header.stamp = this->now();
     for (size_t i = 0; i < 7; i++) {
       joint_state_to_pub.position[i] = state.q[i];
-      joint_state_to_pub.position[i] = state.dq[i];
-      joint_state_to_pub.position[i] = state.tau_J[i];
+      joint_state_to_pub.velocity[i] = state.dq[i];
+      joint_state_to_pub.effort[i] = state.tau_J[i];
     }
 
     joint_states_pub->tryPublish(joint_state_to_pub);

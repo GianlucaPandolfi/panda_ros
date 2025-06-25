@@ -115,15 +115,7 @@ def generate_launch_description():
             'use_sim_time': use_sim_time,
         }],
     )
-    cart_traj_server = Node(
-        package='panda_utils',
-        executable='cart_traj',
-        name='cart_traj_server',
-        parameters=[{
-            'use_sim_time': use_sim_time,
-            # 'loop_rate_freq': loop_rate_freq,
-        }],
-    )
+    
     clik_cmd_pub = Node(
         package='panda_utils',
         executable='clik_cmd_pub',
@@ -134,18 +126,7 @@ def generate_launch_description():
             'gamma': LaunchConfiguration('clik_gamma'),
         }],
     )
-    pd_grav_controller = Node(
-        package='panda_utils',
-        executable='pd_grav_controller',
-        name='pd_grav_controller',
-        parameters=[{
-            'use_sim_time': use_sim_time,
-            'Kp': LaunchConfiguration('controller_kp'),
-            'Kd': LaunchConfiguration('controller_kd'),
-            'control_freq': LaunchConfiguration('controller_rate'),
-            'clamp': LaunchConfiguration('clamp_effort_control')
-        }],
-    )
+    
     inverse_dynamics_controller = Node(
         package='panda_utils',
         executable='inverse_dynamics_controller',
@@ -164,23 +145,7 @@ def generate_launch_description():
 
         }],
     )
-    impedance_controller = Node(
-        package='panda_utils',
-        executable='impedance_controller',
-        name='impedance_controller',
-        parameters=[{
-            'use_sim_time': use_sim_time,
-            'Kp': LaunchConfiguration('controller_kp'),
-            'Kd': LaunchConfiguration('controller_kd'),
-            'Md': LaunchConfiguration('controller_md'),
-            'lambda': LaunchConfiguration('lambda'),
-            'control_freq': LaunchConfiguration('controller_rate'),
-            'clamp': LaunchConfiguration('clamp_effort_control'),
-            'use_robot': LaunchConfiguration('use_robot'),
-            'robot_ip': LaunchConfiguration('robot_ip')
-
-        }],
-    )
+   
     controller_manager = Node(
         package='panda_utils',
         executable='controller_manager',
@@ -206,10 +171,8 @@ def generate_launch_description():
         alpha,
         effort_cmd_server,
         joint_traj_server,
-        cart_traj_server,
         clik_cmd_pub,
         inverse_dynamics_controller,
-        impedance_controller,
         # pos_cmds_joints,
         # pd_grav_controller,
         # controller_manager

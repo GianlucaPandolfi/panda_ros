@@ -12,11 +12,11 @@ find_package(sensor_msgs REQUIRED)
 find_package(panda_interfaces REQUIRED)
 
 include_directories(
-  ~/libfranka/include/
+  ~/Gianluca/libfranka/include/
 )
 
 link_directories(
-  ~/libfranka/build/
+   ~/Gianluca/libfranka/build/
 )
 add_executable(joint_state_publisher_effort_patcher ./src/joint_state_publisher_effort_patcher.cpp)
 ament_target_dependencies(joint_state_publisher_effort_patcher rclcpp sensor_msgs panda_interfaces)

@@ -28,9 +28,20 @@ using GoalHandleJointTraj = rclcpp_action::ClientGoalHandle<JointTraj>;
 int main(int argc, char **argv) {
   rclcpp::init(argc, argv);
 
+  panda_interfaces::msg::JointsCommand desired_config;
+  desired_config.positions =
+      std::array<double, 7>{M_PI_2, -M_PI_4,           M_PI_4, -3.0 / 4.0 * M_PI,
+                            M_PI_2, 3.0 / 4.0 * M_PI, M_PI_4};
   double total_time = 5.0;
-  if (argc >= 2) {
-    total_time = atoi(argv[1]);
+  if (argc == 8) {
+    // If the user provided a desired configuration, use it
+    for (int i = 0; i < 7; ++i) {
+      desired_config.positions[i] = std::stod(argv[i + 1]);
+    }
+  } else if (argc > 1) {
+    RCLCPP_ERROR_STREAM(rclcpp::get_logger("rclcpp"),
+                        "Usage: joint_traj_example [q1 q2 q3 q4 q5 q6 q7 [total_time]]");
+    return -1;
   }
 
   auto node = std::make_shared<rclcpp::Node>("joint_traj_example_node");
@@ -53,36 +64,13 @@ int main(int argc, char **argv) {
   initial_config.positions = std::array<double, 7>{
       0.0, -M_PI_4, 0.0, -M_PI_2, 0.0, 3.0 * M_PI / 4.0, M_PI_4};
 
-  panda_interfaces::msg::JointsCommand desired_config;
-  desired_config.positions = std::array<double, 7>{
-      0.0, 0.0, 0.0, -3.0 / 4.0 * M_PI, 0.0, 3.0 / 4.0 * M_PI, M_PI_4};
-  desired_config.positions =
-      std::array<double, 7>{M_PI_2, -M_PI_4,           M_PI_4, -3.0 / 4.0 * M_PI,
-                            M_PI_2, 3.0 / 4.0 * M_PI, M_PI_4};
+  
   // desired_config.positions =
   //     std::array<double, 7>{0.0, 0.0, 0.0, -3.0 / 4.0 * M_PI, 0.0, 0.0, 0.0};
 
   RCLCPP_INFO(node->get_logger(), "Waiting for servers...");
   joint_traj_action_client->wait_for_action_server();
   RCLCPP_INFO(node->get_logger(), "Servers UP");
-
-  // Send robot initial config
-  // {
-  //   RCLCPP_INFO_STREAM(node->get_logger(),
-  //                      "Sending initial joint configuration to robot: ["
-  //                          << initial_config.positions[0] << ", "
-  //                          << initial_config.positions[1] << ", "
-  //                          << initial_config.positions[2] << ", "
-  //                          << initial_config.positions[3] << ", "
-  //                          << initial_config.positions[4] << ", "
-  //                          << initial_config.positions[5] << ", "
-  //                          << initial_config.positions[6] << ", "
-  //                          << "], press ENTER");
-  //   std::cin.ignore();
-  //
-  //   initial_config.header.stamp = node->now();
-  //   joint_cmd_pub->publish(initial_config);
-  // }
 
   // Calling action server
   {

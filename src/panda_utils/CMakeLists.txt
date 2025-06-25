@@ -24,13 +24,13 @@ find_package(realtime_tools REQUIRED)
 
 include_directories(
   include
-  /opt/ros/jazzy/include
-  /opt/ros/jazzy/include/pinocchio
-  ~/libfranka/include/
+  /opt/ros/humble/include
+  /opt/ros/humble/include/pinocchio
+  ~/Gianluca/libfranka/include/
 )
 
 link_directories(
-  ~/libfranka/build/
+   ~/Gianluca/libfranka/build/
 )
 
 add_library(robot_model
@@ -62,9 +62,6 @@ ament_target_dependencies(send_joints_effort_simple_client rclcpp panda_interfac
 add_executable(joint_traj ./src/joint_traj.cpp)
 ament_target_dependencies(joint_traj rclcpp panda_interfaces std_msgs tf2_eigen tf2 tf2_msgs sensor_msgs realtime_tools)
 
-add_executable(cart_traj ./src/cart_traj.cpp)
-ament_target_dependencies(cart_traj rclcpp panda_interfaces std_msgs tf2_eigen tf2 tf2_msgs sensor_msgs)
-
 add_executable(clik_cmd_pub ./src/clik_cmd_publisher.cpp)
 ament_target_dependencies(clik_cmd_pub rclcpp panda_interfaces std_msgs tf2_eigen tf2 tf2_msgs sensor_msgs rclcpp_lifecycle ament_index_cpp)
 target_link_libraries(clik_cmd_pub robot_model)
@@ -75,10 +72,6 @@ ament_target_dependencies(demo_node rclcpp panda_interfaces std_msgs tf2_eigen t
 add_executable(pinocchio_example ./examples/pinocchio_example.cpp)
 ament_target_dependencies(pinocchio_example rclcpp panda_interfaces std_msgs tf2_eigen tf2 tf2_msgs sensor_msgs pinocchio ament_index_cpp)
 target_link_libraries(pinocchio_example robot_model)
-
-add_executable(pd_grav_controller ./src/pd_grav_controller.cpp)
-ament_target_dependencies(pd_grav_controller rclcpp panda_interfaces std_msgs tf2_eigen tf2 tf2_msgs sensor_msgs pinocchio ament_index_cpp rclcpp_lifecycle)
-target_link_libraries(pd_grav_controller robot_model)
 
 add_executable(inverse_dynamics_controller ./src/inverse_dynamics_controller.cpp)
 ament_target_dependencies(inverse_dynamics_controller rclcpp panda_interfaces std_msgs tf2_eigen tf2 tf2_msgs sensor_msgs pinocchio ament_index_cpp rclcpp_lifecycle realtime_tools)
@@ -99,10 +92,6 @@ target_link_libraries(cart_traj_example robot_model)
 add_executable(joint_traj_example ./examples/joint_traj_example.cpp)
 ament_target_dependencies(joint_traj_example rclcpp panda_interfaces std_msgs tf2_eigen tf2 tf2_msgs sensor_msgs pinocchio ament_index_cpp rclcpp_lifecycle)
 
-add_executable(impedance_controller ./src/impedance_controller.cpp)
-ament_target_dependencies(impedance_controller rclcpp panda_interfaces std_msgs tf2_eigen tf2 tf2_msgs sensor_msgs pinocchio ament_index_cpp rclcpp_lifecycle)
-target_link_libraries(impedance_controller robot_model franka)
-
 add_executable(joint_traj_test ./examples/joint_trajectory_test.cpp)
 ament_target_dependencies(joint_traj_test rclcpp panda_interfaces std_msgs tf2_eigen tf2 tf2_msgs sensor_msgs pinocchio ament_index_cpp rclcpp_lifecycle)
 
@@ -112,17 +101,14 @@ install(TARGETS
   send_joints_effort_server
   send_joints_effort_simple_client
   joint_traj
-  cart_traj
   clik_cmd_pub
   demo_node
   pinocchio_example
-  pd_grav_controller
   pd_grav_controller_demo
   inverse_dynamics_controller
   controller_manager
   cart_traj_example
   joint_traj_example
-  impedance_controller
   joint_traj_test
   DESTINATION lib/${PROJECT_NAME}
 )

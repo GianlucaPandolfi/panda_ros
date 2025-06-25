@@ -5,6 +5,7 @@
 #include "rclcpp/rclcpp.hpp"
 #include "rclcpp_action/rclcpp_action.hpp"
 #include "sensor_msgs/msg/joint_state.hpp"
+#include "rclcpp/wait_for_message.hpp"
 #include <cmath>
 #include <cstddef>
 #include <cstdlib>
@@ -28,7 +29,8 @@ using GoalHandleTrajMove = rclcpp_action::ServerGoalHandle<TrajMove>;
 using sensor_msgs::msg::JointState;
 using namespace std::chrono_literals;
 
-double qintic(double q_i, double q_f, double t, double t_f) {
+double qintic(double q_i, double q_f, double t, double t_f)
+{
   if (t <= 0)
     return q_i;
   if (t >= t_f)
@@ -40,7 +42,8 @@ double qintic(double q_i, double q_f, double t, double t_f) {
   return q_i + (q_f - q_i) * q_cap;
 }
 
-double qintic_velocity(double q_i, double q_f, double t, double t_f) {
+double qintic_velocity(double q_i, double q_f, double t, double t_f)
+{
   if (t <= 0)
     return 0;
   if (t >= t_f)
@@ -52,7 +55,8 @@ double qintic_velocity(double q_i, double q_f, double t, double t_f) {
   return (q_f - q_i) * q_cap / t_f;
 }
 
-double qintic_accel(double q_i, double q_f, double t, double t_f) {
+double qintic_accel(double q_i, double q_f, double t, double t_f)
+{
   if (t <= 0)
     return 0;
   if (t >= t_f)
@@ -63,13 +67,16 @@ double qintic_accel(double q_i, double q_f, double t, double t_f) {
   return (q_f - q_i) * q_cap / std::pow(t_f, 2);
 }
 
-class JointTrajectory : public rclcpp::Node {
+class JointTrajectory : public rclcpp::Node
+{
 
 public:
   JointTrajectory(const rclcpp::NodeOptions opt = rclcpp::NodeOptions())
-      : Node("joint_trajectory", opt) {
+      : Node("joint_trajectory", opt)
+  {
 
-    auto save_joints_state = [this](const JointState::SharedPtr msg) {
+    auto save_joints_state = [this](const JointState::SharedPtr msg)
+    {
       this->joint_state = msg;
     };
 
@@ -84,7 +91,8 @@ public:
             panda_interface_names::DEFAULT_TOPIC_QOS));
 
     auto handle_goal = [this](const rclcpp_action::GoalUUID uuid,
-                              std::shared_ptr<const TrajMove::Goal> goal) {
+                              std::shared_ptr<const TrajMove::Goal> goal)
+    {
       RCLCPP_INFO(this->get_logger(), "Received goal request");
       RCLCPP_INFO_STREAM(this->get_logger(),
                          "Joint desired config is: ["
@@ -104,23 +112,25 @@ public:
 
     auto handle_cancel =
         [this](const std::shared_ptr<rclcpp_action::ServerGoalHandle<TrajMove>>
-                   goal_handle) {
-          RCLCPP_INFO(this->get_logger(), "Received request to cancel goal");
-          TrajMove::Result::SharedPtr result =
-              std::make_shared<TrajMove::Result>();
-          result->completed = false;
-          goal_handle->canceled(result);
-          (void)goal_handle;
-          return rclcpp_action::CancelResponse::ACCEPT;
-        };
+                   goal_handle)
+    {
+      RCLCPP_INFO(this->get_logger(), "Received request to cancel goal");
+      TrajMove::Result::SharedPtr result =
+          std::make_shared<TrajMove::Result>();
+      result->completed = false;
+      goal_handle->canceled(result);
+      (void)goal_handle;
+      return rclcpp_action::CancelResponse::ACCEPT;
+    };
 
     auto handle_accepted =
-        [this](const std::shared_ptr<GoalHandleTrajMove> goal_handle) {
-          using namespace std::placeholders;
-          std::thread{std::bind(&JointTrajectory::execute, this, _1),
-                      goal_handle}
-              .detach();
-        };
+        [this](const std::shared_ptr<GoalHandleTrajMove> goal_handle)
+    {
+      using namespace std::placeholders;
+      std::thread{std::bind(&JointTrajectory::execute, this, _1),
+                  goal_handle}
+          .detach();
+    };
 
     this->action_traj_server = rclcpp_action::create_server<TrajMove>(
         this, panda_interface_names::panda_traj_move_action_name, handle_goal,
@@ -135,18 +145,25 @@ private:
   rclcpp_action::Server<TrajMove>::SharedPtr action_traj_server;
   JointState::SharedPtr joint_state;
 
-  void execute(const std::shared_ptr<GoalHandleTrajMove> goal_handle) {
+  void execute(const std::shared_ptr<GoalHandleTrajMove> goal_handle)
+  {
 
-    if (realtime_tools::has_realtime_kernel()) {
-      if (!realtime_tools::configure_sched_fifo(98)) {
+    if (realtime_tools::has_realtime_kernel())
+    {
+      if (!realtime_tools::configure_sched_fifo(98))
+      {
         RCLCPP_WARN(this->get_logger(),
                     "Execute thread: Could not set SCHED_FIFO."
                     " Running with default scheduler.");
-      } else {
+      }
+      else
+      {
         RCLCPP_INFO(this->get_logger(),
                     "Execute thread: Set SCHED_FIFO priority.");
       }
-    } else {
+    }
+    else
+    {
       RCLCPP_WARN(this->get_logger(),
                   "Execute thread: No real-time kernel detected.");
     }
@@ -157,26 +174,42 @@ private:
     auto result = std::make_shared<TrajMove::Result>();
 
     // Get joint configuration now
-    RCLCPP_INFO(this->get_logger(), "Waiting for current joints config");
+    // RCLCPP_INFO(this->get_logger(), "Waiting for current joints config");
+    // JointState q0;
+
+    // joint_state = nullptr;
+    // while (rclcpp::ok() && !joint_state)
+    // {
+    //   // std::this_thread::sleep_for(1s);
+    //   // RCLCPP_INFO(this->get_logger(), "Still waiting current joint state");
+    // }
+    // q0 = *joint_state;
+
     JointState q0;
-    joint_state = nullptr;
-    while (rclcpp::ok() && !joint_state) {
-      std::this_thread::sleep_for(500ns);
-      RCLCPP_INFO(this->get_logger(), "Still waiting current joint state");
+    if (!rclcpp::wait_for_message<JointState>(q0, this->shared_from_this(), panda_interface_names::joint_state_topic_name))
+    {
+      RCLCPP_ERROR(this->get_logger(), "Failed to get current joint state");
+      return;
     }
-    q0 = *joint_state;
+    RCLCPP_INFO_STREAM(this->get_logger(), "Current joints config is: ["
+                                               << q0.position[0] << ", " << q0.position[1] << ", "
+                                               << q0.position[2] << ", " << q0.position[3] << ", "
+                                               << q0.position[4] << ", " << q0.position[5] << ", "
+                                               << q0.position[6] << "]");
 
     rclcpp::Time t0 = this->get_clock()->now();
     rclcpp::Duration t = rclcpp::Duration(0, 0);
 
     rclcpp::Duration traj_duration = rclcpp::Duration(goal->total_time, 0);
 
-    while (rclcpp::ok() && t < traj_duration) {
+    while (rclcpp::ok() && t < traj_duration)
+    {
       t = this->get_clock()->now() - t0;
       // Get next JointState
       panda_interfaces::msg::JointsCommand cmd;
 
-      for (size_t i = 0; i < 7; i++) {
+      for (size_t i = 0; i < 7; i++)
+      {
 
         cmd.positions[i] =
             qintic(q0.position[i], goal->desired_joint_cmd.positions[i],
@@ -203,28 +236,36 @@ private:
     }
 
     // Check if goal is done
-    if (rclcpp::ok()) {
+    if (rclcpp::ok())
+    {
       result->completed = true;
       goal_handle->succeed(result);
       RCLCPP_INFO(this->get_logger(), "Goal succeeded");
-    } else {
+    }
+    else
+    {
       result->completed = false;
     }
   }
 };
 
-int main(int argc, char *argv[]) {
+int main(int argc, char *argv[])
+{
   rclcpp::init(argc, argv);
 
   auto node = std::make_shared<JointTrajectory>();
 
-  if (!realtime_tools::has_realtime_kernel()) {
+  if (!realtime_tools::has_realtime_kernel())
+  {
     RCLCPP_ERROR(node->get_logger(), "No real time kernel");
   }
-  if (!realtime_tools::configure_sched_fifo(98)) {
+  if (!realtime_tools::configure_sched_fifo(98))
+  {
     RCLCPP_ERROR(node->get_logger(),
                  "Couldn't configure real time priority for current node");
-  } else {
+  }
+  else
+  {
     RCLCPP_INFO(node->get_logger(), "Set real time priority");
   }
   RCLCPP_INFO(node->get_logger(), "Node spinned");
