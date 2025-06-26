@@ -32,6 +32,8 @@ rosidl_generate_interfaces(${PROJECT_NAME}
   "./srv/SetComplianceMode.srv"
   "./action/LoopCartTraj.action"
   "./msg/HumanDetected.msg"
+  "./msg/DoubleArrayStamped.msg"
+  "./msg/DoubleStamped.msg"
   DEPENDENCIES tf2_msgs geometry_msgs std_msgs
 )
 

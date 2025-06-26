@@ -26,10 +26,10 @@ using namespace std::chrono_literals;
 using TrajMove = panda_interfaces::action::JointTraj;
 using GoalHandleTrajMove = rclcpp_action::ClientGoalHandle<TrajMove>;
 
-int main(int argc, char **argv) {
+int main(int argc, char *argv[]) {
   rclcpp::init(argc, argv);
   auto node = std::make_shared<rclcpp::Node>("cart_traj_example_node");
-  geometry_msgs::msg::Pose desired_pose;
+  geometry_msgs::msg::Pose delta_pose;
   double total_time = 5.0;
 
   switch (argc) {
@@ -44,17 +44,50 @@ int main(int argc, char **argv) {
   }
   case 5: {
 
-    RCLCPP_INFO(node->get_logger(), "Choosing time and desired pose (only "
-                                    "translation) for cartesian trajectory");
     total_time = atoi(argv[1]);
-    desired_pose.position.x = atoi(argv[2]);
-    desired_pose.position.y = atoi(argv[3]);
-    desired_pose.position.z = atoi(argv[4]);
+    delta_pose.position.x = atof(argv[2]);
+    delta_pose.position.y = atof(argv[3]);
+    delta_pose.position.z = atof(argv[4]);
+    RCLCPP_INFO_STREAM(
+        node->get_logger(),
+        "Choosing time ("
+            << total_time
+            << ") and desired pose with delta on initial pose (only "
+               "translation) for cartesian trajectory; Delta pose position: ["
+            << delta_pose.position.x << ", " << delta_pose.position.y << ", "
+            << delta_pose.position.z << "]");
+    break;
+  }
+
+  case 9: {
+
+    total_time = atoi(argv[1]);
+
+    delta_pose.position.x = atof(argv[2]);
+    delta_pose.position.y = atof(argv[3]);
+    delta_pose.position.z = atof(argv[4]);
+
+    delta_pose.orientation.w = atof(argv[4]);
+    delta_pose.orientation.x = atof(argv[2]);
+    delta_pose.orientation.y = atof(argv[3]);
+    delta_pose.orientation.z = atof(argv[4]);
+    RCLCPP_INFO_STREAM(
+        node->get_logger(),
+        "Choosing time ("
+            << total_time
+            << ") and desired pose with delta on initial pose (only "
+               "translation) for cartesian trajectory; Delta pose position: ["
+            << delta_pose.position.x << ", " << delta_pose.position.y << ", "
+            << delta_pose.position.z << "]. Delta pose orientaion: ["
+            << delta_pose.orientation.w << ", " << delta_pose.orientation.x
+            << ", " << delta_pose.orientation.y << ", "
+            << delta_pose.orientation.z << "].");
     break;
   }
   default: {
 
-    RCLCPP_ERROR(node->get_logger(), "Too many arguments, shutting down");
+    RCLCPP_ERROR(node->get_logger(),
+                 "Wrong number of arguments, shutting down");
     rclcpp::shutdown();
     return 0;
   }
@@ -75,9 +108,6 @@ int main(int argc, char **argv) {
   Robot<7> panda_mine(PANDA_DH_PARAMETERS, PANDA_JOINT_TYPES,
                       OrientationConfiguration::UNIT_QUATERNION);
   geometry_msgs::msg::Pose initial_pose;
-  initial_pose.position.x = 0.2;
-  initial_pose.position.y = 0.2;
-  initial_pose.position.z = 0.2;
 
   RCLCPP_INFO(node->get_logger(), "Waiting for servers...");
   cart_traj_action_client->wait_for_action_server();
@@ -122,13 +152,14 @@ int main(int argc, char **argv) {
     cart_goal.initial_pose = initial_pose;
     geometry_msgs::msg::Pose desired_pose;
     desired_pose = initial_pose;
-    desired_pose.position.y += 0.2;
-    desired_pose.position.x += 0.1;
+    desired_pose.position.x = desired_pose.position.x + delta_pose.position.x;
+    desired_pose.position.y = desired_pose.position.y + delta_pose.position.y;
+    desired_pose.position.z = desired_pose.position.z + delta_pose.position.z;
 
-    desired_pose.orientation.w = SQRT2DIV2;
-    desired_pose.orientation.x = 0.0;
-    desired_pose.orientation.y = SQRT2DIV2;
-    desired_pose.orientation.z = 0.0;
+    // desired_pose.orientation.w = SQRT2DIV2;
+    // desired_pose.orientation.x = 0.0;
+    // desired_pose.orientation.y = SQRT2DIV2;
+    // desired_pose.orientation.z = 0.0;
     cart_goal.desired_pose = desired_pose;
     cart_goal.total_time = total_time;
 

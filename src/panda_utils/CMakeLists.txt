@@ -100,7 +100,7 @@ add_executable(joint_traj_example ./examples/joint_traj_example.cpp)
 ament_target_dependencies(joint_traj_example rclcpp panda_interfaces std_msgs tf2_eigen tf2 tf2_msgs sensor_msgs pinocchio ament_index_cpp rclcpp_lifecycle)
 
 add_executable(impedance_controller ./src/impedance_controller.cpp)
-ament_target_dependencies(impedance_controller rclcpp panda_interfaces std_msgs tf2_eigen tf2 tf2_msgs sensor_msgs pinocchio ament_index_cpp rclcpp_lifecycle)
+ament_target_dependencies(impedance_controller rclcpp panda_interfaces std_msgs tf2_eigen tf2 tf2_msgs sensor_msgs pinocchio ament_index_cpp rclcpp_lifecycle realtime_tools)
 target_link_libraries(impedance_controller robot_model franka)
 
 add_executable(joint_traj_test ./examples/joint_trajectory_test.cpp)
