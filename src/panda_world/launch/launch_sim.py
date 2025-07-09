@@ -34,13 +34,18 @@ def generate_launch_description():
     pkg_ros_gz_sim = get_package_share_directory('ros_gz_sim')
     pkg_panda_world = get_package_share_directory('panda_world')
 
-    urdf = os.path.join(get_package_share_directory('panda_world'),
-                        'models', 'panda', 'panda_fr3_rviz.urdf')
+    robot_urdf = os.path.join(get_package_share_directory('panda_world'),
+                              'models', 'panda', 'panda_fr3_rviz.urdf')
+    camera_urdf = os.path.join(get_package_share_directory('panda_world'),
+                               'models', 'camera.urdf')
     default_rviz_config = os.path.join(
         get_package_share_directory('panda_world'), 'config', 'config.rviz')
 
-    with open(urdf, 'r') as file:
+    with open(robot_urdf, 'r') as file:
         robot_description = file.read()
+
+    with open(camera_urdf, 'r') as file:
+        camera_description = file.read()
 
     DeclareLaunchArgument(
         'use_sim_time',
@@ -64,7 +69,15 @@ def generate_launch_description():
         name='robot_state_publisher',
         output='screen',
         parameters=[{'use_sim_time': use_sim_time, 'robot_description': robot_description}],
-        arguments=[urdf])
+        arguments=[robot_urdf])
+
+    camera_state = Node(
+        package='robot_state_publisher',
+        executable='robot_state_publisher',
+        name='robot_state_publisher',
+        output='screen',
+        parameters=[{'use_sim_time': use_sim_time, 'robot_description': camera_description}],
+        arguments=[camera_urdf])
 
     panda_fr3_model = PathJoinSubstitution([
         pkg_panda_world,
@@ -141,6 +154,29 @@ def generate_launch_description():
         description='Whether the entity allows renaming or not'
     )
 
+    load_camera = Node(
+        package='ros_gz_sim',
+        executable='create',
+        output='screen',
+        parameters=[{'world': world,
+                     'file': PathJoinSubstitution([
+                         pkg_panda_world,
+                         'models',
+                         'camera.urdf'
+                     ]),
+                     'string': model_string,
+                     'topic': topic,
+                     'name': "camera",
+                     'allow_renaming': allow_renaming,
+                     'x': x,
+                     'y': y,
+                     'z': z,
+                     'R': roll,
+                     'P': pitch,
+                     'Y': yaw,
+                     }],
+    )
+
     load_nodes = Node(
         package='ros_gz_sim',
         executable='create',
@@ -182,7 +218,9 @@ def generate_launch_description():
     # Add the actions to launch all of the create nodes
     ld.add_action(gz_sim)
     ld.add_action(load_nodes)
+    ld.add_action(load_camera)
     ld.add_action(robot_state)
+    ld.add_action(camera_state)
     ld.add_action(bridge)
     ld.add_action(joint_state_publisher_patched)
     ld.add_action(torque_publisher)

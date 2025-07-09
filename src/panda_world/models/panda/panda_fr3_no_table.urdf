@@ -306,5 +306,11 @@
     <safety_controller k_position="100.0" k_velocity="40.0" soft_lower_limit="-3.0159" soft_upper_limit="3.0159"/>
     <dynamics D="1" K="7000" damping="0.003" friction="0.2" mu_coulomb="0" mu_viscous="16"/>
   </joint>
+  <link name="fr3_link8"/>
+  <joint name="fr3_joint8" type="fixed">
+    <origin rpy="0 0 0" xyz="0 0 0.107"/>
+    <parent link="fr3_link7"/>
+    <child link="fr3_link8"/>
+  </joint>
 
 </robot>

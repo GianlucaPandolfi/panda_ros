@@ -885,7 +885,7 @@ private:
   Eigen::VectorXd velocity_limits{};
   Eigen::VectorXd acceleration_limits{};
 
-  const std::string frame_id_name{"fr3_link7"};
+  const std::string frame_id_name{"fr3_joint8"};
 
   // Control loop related variables
   rclcpp::Rate::SharedPtr control_loop_rate;
@@ -1015,7 +1015,6 @@ private:
   void clamp_control_speed(Eigen::Vector<double, 7> &control_input,
                            const double dt) {
 
-    RCLCPP_INFO_STREAM(this->get_logger(), "dt inside clamp speed: " << dt);
     for (int i = 0; i < control_input.size(); i++) {
       if ((abs(control_input[i] - last_control_input[i]) / dt) >
           effort_speed_limits[i]) {
@@ -1288,12 +1287,16 @@ void ImpedanceController::control() {
           desired_pose->position.z - current_pose_tmp.position.z;
 
       // Axis angle error
-      error_pose_vec.tail(3) = err_angle_axis.axis() * err_angle_axis.angle();
+      // error_pose_vec.tail(3) = err_angle_axis.axis() *
+      // err_angle_axis.angle();
 
       // Quaternion vec error
-      // error_pose_vec(3) = error_quat.x();
-      // error_pose_vec(4) = error_quat.y();
-      // error_pose_vec(5) = error_quat.z();
+      // TODO: orientation error is expressed wrt end affector frame, to have
+      // consistency between the error and the jacobian of the EE wrt base i
+      // have to rotate it in base frame
+      error_pose_vec(3) = error_quat.x();
+      error_pose_vec(4) = error_quat.y();
+      error_pose_vec(5) = error_quat.z();
     }
 
     // Update robot model
@@ -1384,10 +1387,10 @@ void ImpedanceController::control() {
     //
     clamp_control(control_input);
 
-    if (clamp) {
-      clamp_control_speed(control_input,
-                          (this->now() - last_control_cycle).seconds());
-    }
+    // if (clamp) {
+    //   clamp_control_speed(control_input,
+    //                       (this->now() - last_control_cycle).seconds());
+    // }
 
     // Apply control
     //
@@ -1404,6 +1407,7 @@ void ImpedanceController::control() {
     if (debug_pub.data().mut.try_lock()) {
 
       debug_pub.data().lambda = lambda;
+      debug_pub.data().sigma_min = sigma_min;
       debug_pub.data().current_twist = current_twist;
       debug_pub.data().des_twist = desired_twist;
       debug_pub.data().des_pose = *desired_pose;

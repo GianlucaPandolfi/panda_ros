@@ -8,7 +8,8 @@ DebugPublisher::DebugPublisher() {
   arr_stamped.data.resize(7);
 }
 
-void DebugPublisher::create_pubs(rclcpp_lifecycle::LifecycleNode::SharedPtr node) {
+void DebugPublisher::create_pubs(
+    rclcpp_lifecycle::LifecycleNode::SharedPtr node) {
 
   robot_joint_efforts_pub_debug = node->create_publisher<JointsEffort>(
       "debug/cmd/effort_no_gravity", panda_interface_names::DEFAULT_TOPIC_QOS);
@@ -66,6 +67,11 @@ void DebugPublisher::create_pubs(rclcpp_lifecycle::LifecycleNode::SharedPtr node
   joint_limits_index_grad_debug =
       node->create_publisher<panda_interfaces::msg::DoubleArrayStamped>(
           "debug/joint_limits_index_grad",
+          panda_interface_names::DEFAULT_TOPIC_QOS);
+
+  min_singular_val_pub =
+      node->create_publisher<panda_interfaces::msg::DoubleStamped>(
+          panda_interface_names::min_singular_value_topic_name,
           panda_interface_names::DEFAULT_TOPIC_QOS);
 }
 

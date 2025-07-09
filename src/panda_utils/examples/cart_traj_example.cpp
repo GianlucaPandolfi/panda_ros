@@ -128,9 +128,9 @@ int main(int argc, char *argv[]) {
           "Choosing time ("
               << total_time
               << ") and desired pose for cartesian trajectory; pose position: ["
-              << desired_pose.position.x << ", " << delta_pose.position.y
+              << desired_pose.position.x << ", " << desired_pose.position.y
               << ", " << desired_pose.position.z << "]. pose orientaion: ["
-              << desired_pose.orientation.w << ", " << delta_pose.orientation.x
+              << desired_pose.orientation.w << ", " << desired_pose.orientation.x
               << ", " << desired_pose.orientation.y << ", "
               << desired_pose.orientation.z << "].");
     }
