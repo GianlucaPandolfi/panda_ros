@@ -17,6 +17,7 @@
 #include "yolo_msgs/msg/key_point3_d_array.hpp"
 #include <Eigen/src/Core/Matrix.h>
 #include <ament_index_cpp/get_package_prefix.hpp>
+#include <atomic>
 #include <boost/fusion/sequence/intrinsic_fwd.hpp>
 #include <cmath>
 #include <cstdint>
@@ -31,6 +32,7 @@
 #include <opencv2/core/hal/interface.h>
 #include <opencv2/core/types.hpp>
 #include <opencv2/imgproc.hpp>
+#include <opencv2/ml.hpp>
 #include <opencv2/photo.hpp>
 #include <opencv2/video/tracking.hpp>
 #include <optional>
@@ -50,6 +52,7 @@
 #include <tf2_ros/static_transform_broadcaster.h>
 #include <tf2_ros/transform_broadcaster.h>
 #include <tf2_ros/transform_listener.h>
+#include <thread>
 #include <utility>
 #include <vector>
 #include <visualization_msgs/msg/marker_array.hpp>
@@ -153,6 +156,9 @@ struct DecisionData {
   rclcpp::Time lost_event_time{};
 };
 
+const auto sensor_qos =
+    rclcpp::QoS(rclcpp::KeepLast(5)).best_effort().durability_volatile();
+
 class SkeletonTrackerYolo : public rclcpp::Node {
 public:
   SkeletonTrackerYolo(double min_depth, double max_depth)
@@ -162,6 +168,8 @@ public:
     this->declare_parameter<double>("process_noise", 0.5);
     this->declare_parameter<double>("measurement_noise", 1.0);
     this->declare_parameter<bool>("no_depth", false);
+    this->declare_parameter<bool>("debug", false);
+    this->declare_parameter<bool>("filter", false);
     this->declare_parameter<int>("MA_window_size", 40);
     std::map<std::string, double> thresholds_parameters;
     thresholds_parameters["ma_confidence_threshold"] = 0.40;
@@ -180,8 +188,10 @@ public:
             .as_double();
 
     MA_window_size = this->get_parameter("MA_window_size").as_int();
+    use_filtering = this->get_parameter("filter").as_bool();
 
-    RCLCPP_INFO_STREAM(this->get_logger(), "Initializing kalman filter variables");
+    RCLCPP_INFO_STREAM(this->get_logger(),
+                       "Initializing kalman filter variables");
     // Initializing kalman filter variables
     kalman_params.Q.setIdentity();
     kalman_params.Q *= this->get_parameter("process_noise").as_double();
@@ -225,30 +235,18 @@ public:
       current_rgb_image = img;
     };
 
-    auto depth_img_cb = [this](const Image::SharedPtr img) {
-      // std::lock_guard<std::mutex> img_mutex(depth_img_mutex);
-      current_depth_image = img;
-    };
-
     auto rgb_camera_info_cb = [this](const sensor_msgs::msg::CameraInfo msg) {
       current_rgb_camera_info = msg;
       rgb_image_geom.fromCameraInfo(current_rgb_camera_info);
     };
 
-    auto depth_camera_info_cb = [this](const sensor_msgs::msg::CameraInfo msg) {
-      current_depth_camera_info = msg;
-      depth_image_geom.fromCameraInfo(current_depth_camera_info);
-    };
-
     RCLCPP_INFO_STREAM(this->get_logger(), "Creating Subscribers");
     detect_array_sub =
         this->create_subscription<yolo_msgs::msg::DetectionArray>(
-            image_constants::detection_array_topic,
-            image_constants::DEFAULT_TOPIC_QOS, det_array_cb);
+            image_constants::detection_array_topic, sensor_qos, det_array_cb);
 
     rgb_image_sub = this->create_subscription<Image>(
-        image_constants::rgb_image_topic, image_constants::DEFAULT_TOPIC_QOS,
-        rgb_img_cb);
+        image_constants::rgb_image_topic, sensor_qos, rgb_img_cb);
 
     std::string depth_image_topic;
     std::string depth_camera_info_topic;
@@ -260,23 +258,15 @@ public:
       depth_image_topic = image_constants::depth_image_topic;
     }
 
-    depth_image_sub = this->create_subscription<Image>(
-        depth_image_topic, image_constants::DEFAULT_TOPIC_QOS, depth_img_cb);
-
     rgb_camera_info_sub =
         this->create_subscription<sensor_msgs::msg::CameraInfo>(
-            image_constants::rgb_camera_info_topic,
-            image_constants::DEFAULT_TOPIC_QOS, rgb_camera_info_cb);
-
-    depth_camera_info_sub =
-        this->create_subscription<sensor_msgs::msg::CameraInfo>(
-            image_constants::depth_camera_info_topic,
-            image_constants::DEFAULT_TOPIC_QOS, depth_camera_info_cb);
+            image_constants::rgb_camera_info_topic, sensor_qos,
+            rgb_camera_info_cb);
 
     skeleton_image_pub =
         std::make_shared<realtime_tools::RealtimePublisher<Image>>(
             this->create_publisher<Image>(image_constants::skeleton_image_topic,
-                                          image_constants::DEFAULT_TOPIC_QOS));
+                                          sensor_qos));
 
     RCLCPP_INFO_STREAM(this->get_logger(), "Creating broadcaster");
     tf_skel_publisher = std::make_unique<tf2_ros::TransformBroadcaster>(*this);
@@ -288,7 +278,8 @@ public:
 
     auto timer_cb = [this]() {
       // If these two images are not nullptr
-      if (detections && current_rgb_image && current_depth_image) {
+      if (detections && current_rgb_image) {
+        auto start = this->now();
         if (last_detection_stamp.seconds() == 0) { // First frame
           last_detection_stamp = detections->header.stamp;
           return;
@@ -297,26 +288,49 @@ public:
             rclcpp::Time(detections->header.stamp) - last_detection_stamp;
         last_detection_stamp = detections->header.stamp;
 
-        // Save current messages to not lose future messages
-        Image rgb_img, depth_img;
+        // RCLCPP_INFO_STREAM(this->get_logger(),
+        //                    "Time calculation Time passed: "
+        //                        << (this->now() - start).seconds());
+        // start = this->now();
+        // // Save current messages to not lose future messages
+        Image rgb_img;
         {
           // std::lock_guard<std::mutex> img_mutex(rgb_mutex);
           // std::lock_guard<std::mutex> depth_mutex(depth_img_mutex);
           rgb_img = *current_rgb_image;
-          depth_img = *current_depth_image;
         }
+        // RCLCPP_INFO_STREAM(this->get_logger(),
+        //                    "Getting images"
+        //                        << " Time passed: "
+        //                        << (this->now() - start).seconds());
+        // start = this->now();
 
         // 1) Get landmark on current image
         //
         auto keypoints_map = get_keypoints();
 
+        // RCLCPP_INFO_STREAM(this->get_logger(),
+        //                    "Get keypoints"
+        //                        << " Time passed: "
+        //                        << (this->now() - start).seconds());
+        // start = this->now();
         // 2) Take decision based on current state
         //
         // Update internal filter state and tracking data
         calc_state_track_data(keypoints_map);
+        // RCLCPP_INFO_STREAM(this->get_logger(),
+        //                    "Calc state track data"
+        //                        << " Time passed: "
+        //                        << (this->now() - start).seconds());
+        // start = this->now();
 
         // Update higher level tracking data
         calc_decision_data(keypoints_map);
+        // RCLCPP_INFO_STREAM(this->get_logger(),
+        //                    "Calc decision data"
+        //                        << " Time passed: "
+        //                        << (this->now() - start).seconds());
+        // start = this->now();
 
         switch (tracking_state) {
         case TargetState::NO_PERSON: {
@@ -381,89 +395,142 @@ public:
           break;
         }
         }
+        // RCLCPP_INFO_STREAM(this->get_logger(),
+        //                    "Main switch"
+        //                        << " Time passed: "
+        //                        << (this->now() - start).seconds());
+        // start = this->now();
 
         // 3) Publish infos to external network
         //
-        this->publish_skeleton_markers();
-        this->publish_keypoints_tf();
+        shared_keypoints = keypoints_map;
+        pub.store(true);
+        // if (use_filtering) {
+        //   this->publish_skeleton_markers();
+        //   this->publish_keypoints_tf();
+        // } else {
+        //   this->publish_skeleton_markers(keypoints_map, !use_filtering);
+        //   this->publish_keypoints_tf(keypoints_map, !use_filtering);
+        // }
+        // RCLCPP_INFO_STREAM(this->get_logger(),
+        //                    "Publishing keypoints"
+        //                        << " Time passed: "
+        //                        << (this->now() - start).seconds());
+        // start = this->now();
 
-        skel_image_output =
-            *(cv_bridge::CvImage(std_msgs::msg::Header(), "rgb8",
-                                 this->create_skel_img(rgb_img, keypoints_map))
-                  .toImageMsg());
-        skeleton_image_pub->tryPublish(skel_image_output.value());
-        debug_print();
+        // 3.1) Publish infos to external network without kalman filtering
+
+        // skel_image_output =
+        //     *(cv_bridge::CvImage(std_msgs::msg::Header(), "rgb8",
+        //                          this->create_skel_img(rgb_img,
+        //                          keypoints_map))
+        //           .toImageMsg());
+        // skeleton_image_pub->tryPublish(skel_image_output.value());
+        // debug_print();
 
         // Set current images to nullptr
         detections = nullptr;
-        current_depth_image = nullptr;
         current_rgb_image = nullptr;
       }
     };
 
+    publishing_thread = std::thread{[this]() {
+      while (!publish_run) {
+        std::this_thread::sleep_for(5ms);
+      }
+
+      while (rclcpp::ok() && publish_run) {
+        if (pub) {
+          if (use_filtering) {
+            this->publish_skeleton_markers();
+            this->publish_keypoints_tf();
+          } else {
+            this->publish_skeleton_markers(this->shared_keypoints,
+                                           !use_filtering);
+            this->publish_keypoints_tf(this->shared_keypoints, !use_filtering);
+          }
+          pub.store(false);
+        }
+      }
+    }};
+
+    // Start thread
+    pub.store(false);
+    publish_run.store(true);
+
     RCLCPP_INFO_STREAM(this->get_logger(), "Creating timer");
     timer = rclcpp::create_timer(this, this->get_clock(), 25ms, timer_cb);
 
-
-    RCLCPP_INFO_STREAM(this->get_logger(), "Creating debug publishers");
     // DEBUG
 
-    dbg_innovations.resize(num_landmarks, Eigen::Vector3d::Zero());
+    auto debug = this->get_parameter("debug").as_bool();
     dbg_uncertainties.resize(num_landmarks,
                              Eigen::Matrix<double, 6, 1>::Zero());
-    dbg_innovation_pubs.resize(num_landmarks);
-    dbg_uncertainty_pubs.resize(num_landmarks);
-    dbg_state_position_pubs.resize(num_landmarks);
-    dbg_state_velocity_pubs.resize(num_landmarks);
+    dbg_innovations.resize(num_landmarks, Eigen::Vector3d::Zero());
     dbg_mahal_dist.data.resize(num_landmarks);
+    if (debug) {
 
-    dbg_mean_conf_pub =
-        this->create_publisher<panda_interfaces::msg::DoubleStamped>(
-            "debug/mean_confidence", 10);
+      RCLCPP_INFO_STREAM(this->get_logger(), "Creating debug publishers");
+      dbg_innovation_pubs.resize(num_landmarks);
+      dbg_uncertainty_pubs.resize(num_landmarks);
+      dbg_state_position_pubs.resize(num_landmarks);
+      dbg_state_velocity_pubs.resize(num_landmarks);
 
-    dbg_all_confs_pub =
-        this->create_publisher<panda_interfaces::msg::DoubleArrayStamped>(
-            "debug/all_confidences", 10);
+      dbg_mean_conf_pub =
+          this->create_publisher<panda_interfaces::msg::DoubleStamped>(
+              "debug/mean_confidence", 10);
 
-    dbg_all_depths_pub =
-        this->create_publisher<panda_interfaces::msg::DoubleArrayStamped>(
-            "debug/all_depths", 10);
-
-    dbg_all_mahal_dist_pub =
-        this->create_publisher<panda_interfaces::msg::DoubleArrayStamped>(
-            "debug/all_mahal_dist", 10);
-
-    for (int i = 0; i < num_landmarks; ++i) {
-      std::string topic_name_position =
-          "debug/landmark_" + image_constants::coco_keypoints[i] + "/position";
-      std::string topic_name_velocity =
-          "debug/landmark_" + image_constants::coco_keypoints[i] + "/velocity";
-      dbg_state_position_pubs[i] =
-          this->create_publisher<geometry_msgs::msg::PointStamped>(
-              topic_name_position, 10);
-      dbg_state_velocity_pubs[i] =
-          this->create_publisher<geometry_msgs::msg::Vector3Stamped>(
-              topic_name_velocity, 10);
-    }
-
-    for (int i = 0; i < num_landmarks; ++i) {
-      std::string innovation_topic_name = "debug/landmark_" +
-                                          image_constants::coco_keypoints[i] +
-                                          "/innovation";
-      dbg_innovation_pubs[i] =
-          this->create_publisher<geometry_msgs::msg::Vector3Stamped>(
-              innovation_topic_name, 10);
-
-      std::string uncertainty_topic_name = "debug/landmark_" +
-                                           image_constants::coco_keypoints[i] +
-                                           "/uncertainty";
-      dbg_uncertainty_pubs[i] =
+      dbg_all_confs_pub =
           this->create_publisher<panda_interfaces::msg::DoubleArrayStamped>(
-              uncertainty_topic_name, 10);
+              "debug/all_confidences", 10);
+
+      dbg_all_depths_pub =
+          this->create_publisher<panda_interfaces::msg::DoubleArrayStamped>(
+              "debug/all_depths", 10);
+
+      dbg_all_mahal_dist_pub =
+          this->create_publisher<panda_interfaces::msg::DoubleArrayStamped>(
+              "debug/all_mahal_dist", 10);
+
+      for (int i = 0; i < num_landmarks; ++i) {
+        std::string topic_name_position = "debug/landmark_" +
+                                          image_constants::coco_keypoints[i] +
+                                          "/position";
+        std::string topic_name_velocity = "debug/landmark_" +
+                                          image_constants::coco_keypoints[i] +
+                                          "/velocity";
+        dbg_state_position_pubs[i] =
+            this->create_publisher<geometry_msgs::msg::PointStamped>(
+                topic_name_position, 10);
+        dbg_state_velocity_pubs[i] =
+            this->create_publisher<geometry_msgs::msg::Vector3Stamped>(
+                topic_name_velocity, 10);
+      }
+
+      for (int i = 0; i < num_landmarks; ++i) {
+        std::string innovation_topic_name = "debug/landmark_" +
+                                            image_constants::coco_keypoints[i] +
+                                            "/innovation";
+        dbg_innovation_pubs[i] =
+            this->create_publisher<geometry_msgs::msg::Vector3Stamped>(
+                innovation_topic_name, 10);
+
+        std::string uncertainty_topic_name =
+            "debug/landmark_" + image_constants::coco_keypoints[i] +
+            "/uncertainty";
+        dbg_uncertainty_pubs[i] =
+            this->create_publisher<panda_interfaces::msg::DoubleArrayStamped>(
+                uncertainty_topic_name, 10);
+      }
     }
 
     RCLCPP_INFO_STREAM(this->get_logger(), "Created successfully the "
                                                << this->get_name() << " node");
+  }
+  ~SkeletonTrackerYolo() {
+    RCLCPP_INFO_STREAM(this->get_logger(), "Joining publish thread");
+    publish_run.store(false);
+    publishing_thread.join();
   }
 
 private:
@@ -471,9 +538,7 @@ private:
   // Detection array Sub
   Subscription<yolo_msgs::msg::DetectionArray>::SharedPtr detect_array_sub;
   Subscription<Image>::SharedPtr rgb_image_sub;
-  Subscription<Image>::SharedPtr depth_image_sub;
   Subscription<sensor_msgs::msg::CameraInfo>::SharedPtr rgb_camera_info_sub;
-  Subscription<sensor_msgs::msg::CameraInfo>::SharedPtr depth_camera_info_sub;
   std::unique_ptr<tf2_ros::TransformListener> tf_listener;
   std::unique_ptr<tf2_ros::StaticTransformBroadcaster> tf_static_broadcaster;
   tf2::BufferCore tf_buffer;
@@ -506,16 +571,12 @@ private:
 
   // Image processing
   std::mutex rgb_mutex;
-  std::mutex depth_img_mutex;
   Image::SharedPtr current_rgb_image;
-  Image::SharedPtr current_depth_image;
   sensor_msgs::msg::CameraInfo current_rgb_camera_info;
-  sensor_msgs::msg::CameraInfo current_depth_camera_info;
   const std::string camera_frame = "kinect_rgb";
   double min_depth, max_depth;
   int num_landmarks;
   image_geometry::PinholeCameraModel rgb_image_geom;
-  image_geometry::PinholeCameraModel depth_image_geom;
   image_geometry::StereoCameraModel stereo_camera_model;
 
   // Detection array
@@ -533,7 +594,12 @@ private:
   DecisionData tracking_decision_data;
   kalman_filt_params<double, 6, 3> kalman_params;
   std::vector<state<double, 6>> filter_state;
+  bool use_filtering;
   rclcpp::Duration delta_time{0, 0};
+  std::thread publishing_thread;
+  std::atomic<bool> publish_run;
+  std::atomic<bool> pub;
+  std::map<int, skeleton_utils::landmark_3d> shared_keypoints;
 
   // Debug
   std::vector<Eigen::Vector3d> dbg_innovations;
@@ -543,14 +609,14 @@ private:
   cv::Mat
   create_skel_img(Image background_scene,
                   const std::map<int, skeleton_utils::landmark_3d> &keypoints);
-  std::vector<std::optional<geometry_msgs::msg::Point>>
-  project_pixels_to_3d(std::vector<double> depths);
-  void publish_keypoints_tf();
-  void publish_skeleton_markers();
-  std::vector<double>
-  calculate_depths(cv::Mat depth_image,
-                   std::vector<cv::Point2d> depth_pixels_normalized);
-  std::vector<cv::Point2d> calculate_depth_pixels();
+  void publish_keypoints_tf(
+      const std::map<int, skeleton_utils::landmark_3d> &keypoints =
+          std::map<int, skeleton_utils::landmark_3d>(),
+      bool print_keypoints = false);
+  void publish_skeleton_markers(
+      const std::map<int, skeleton_utils::landmark_3d> &keypoints =
+          std::map<int, skeleton_utils::landmark_3d>(),
+      bool print_keypoints = false);
   void
   kalman_predict(const std::map<int, skeleton_utils::landmark_3d> &keypoints,
                  bool init_new = true, bool only_predict = false);
@@ -567,9 +633,14 @@ private:
         detections->detections[0].keypoints3d.data;
     // At every detection the vector is filled again with the keypoints detected
     for (auto keypoint : keypoints) {
+      // YOLO counting keypoints from 1 to 17
       auto id = keypoint.id;
-      keypoints_map[id].point = keypoint.point;
-      keypoints_map[id].conf = keypoint.score;
+      // Check for depth
+      auto depth = keypoint.point.z;
+      if (depth >= min_depth && depth <= max_depth) {
+        keypoints_map[id - 1].point = keypoint.point;
+        keypoints_map[id - 1].conf = keypoint.score;
+      }
     }
     return keypoints_map;
   }
@@ -650,30 +721,6 @@ private:
     }
   }
 };
-
-std::vector<cv::Point2d> SkeletonTrackerYolo::calculate_depth_pixels() {
-  auto rgb_width = rgb_image_geom.cameraInfo().width;
-  auto rgb_height = rgb_image_geom.cameraInfo().height;
-  auto depth_width = depth_image_geom.cameraInfo().width;
-  auto depth_height = depth_image_geom.cameraInfo().height;
-  std::vector<cv::Point2d> depth_pixels;
-  for (auto landmark : landmarks) {
-    cv::Point2d rgb_pixel;
-
-    // rgb_pixel.x = landmark.second.x * rgb_width;
-    // rgb_pixel.y = landmark.second.y * rgb_height;
-    // auto rgb_3d_point = rgb_image_geom.projectPixelTo3dRay(rgb_pixel);
-    // cv::Point2d depth_pixel =
-    // depth_image_geom.project3dToPixel(rgb_3d_point); depth_pixel.x =
-    // depth_pixel.x / depth_width; depth_pixel.y = depth_pixel.y /
-    // depth_height; depth_pixels.push_back(depth_pixel);
-
-    rgb_pixel.x = landmark.second.x;
-    rgb_pixel.y = landmark.second.y;
-    depth_pixels.push_back(rgb_pixel);
-  }
-  return depth_pixels;
-}
 
 void SkeletonTrackerYolo::debug_print() {
   if (landmarks.empty()) {
@@ -831,7 +878,16 @@ void SkeletonTrackerYolo::kalman_predict(
   }
 }
 
-void SkeletonTrackerYolo::publish_skeleton_markers() {
+void SkeletonTrackerYolo::publish_skeleton_markers(
+    const std::map<int, skeleton_utils::landmark_3d> &keypoints,
+    bool print_keypoints) {
+  std::vector<state<double, 6>> filter_state;
+  std::map<int, skeleton_utils::landmark_3d> keypoints_inside_func;
+  if (!print_keypoints) {
+    filter_state = this->filter_state;
+  } else {
+    keypoints_inside_func = keypoints;
+  }
   auto now = this->get_clock()->now();
   visualization_msgs::msg::MarkerArray marker_array;
 
@@ -851,17 +907,35 @@ void SkeletonTrackerYolo::publish_skeleton_markers() {
   joint_marker.scale.z = 0.03;
 
   // Loop through all landmarks
-  for (int i = 0; i < num_landmarks; ++i) {
-    if (filter_state[i].is_initialized) {
-      // Add the 3D point from your Kalman filter's state
-      geometry_msgs::msg::Point p = landmark_3d[i];
+  if (!print_keypoints) {
+    for (int i = 0; i < num_landmarks; ++i) {
+      if (filter_state[i].is_initialized) {
+        // Add the 3D point from your Kalman filter's state
+        geometry_msgs::msg::Point p = landmark_3d[i];
+        joint_marker.points.push_back(p);
+
+        // Set the color based on confidence or uncertainty
+        std_msgs::msg::ColorRGBA color;
+        // Example: Green for high confidence, Red for low.
+        // You can get more fancy with gradients here.
+        float confidence = landmarks.count(i) ? filter_state[i].ma_conf : 0.0f;
+        color.r = 1.0f - confidence;
+        color.g = confidence;
+        color.b = 0.0f;
+        color.a = 1.0f;
+        joint_marker.colors.push_back(color);
+      }
+    }
+  } else {
+    for (auto keypoint : keypoints_inside_func) {
+      geometry_msgs::msg::Point p = keypoint.second.point;
       joint_marker.points.push_back(p);
 
       // Set the color based on confidence or uncertainty
       std_msgs::msg::ColorRGBA color;
       // Example: Green for high confidence, Red for low.
       // You can get more fancy with gradients here.
-      float confidence = landmarks.count(i) ? filter_state[i].ma_conf : 0.0f;
+      float confidence = keypoint.second.conf;
       color.r = 1.0f - confidence;
       color.g = confidence;
       color.b = 0.0f;
@@ -898,13 +972,28 @@ void SkeletonTrackerYolo::publish_skeleton_markers() {
     int end_idx = bone.second;
 
     // Only draw the bone if both of its joints are being tracked
-    if (filter_state[start_idx].is_initialized &&
-        filter_state[end_idx].is_initialized) {
-      geometry_msgs::msg::Point p_start = landmark_3d[start_idx];
-      geometry_msgs::msg::Point p_end = landmark_3d[end_idx];
+    if (!print_keypoints) {
 
-      bone_marker.points.push_back(p_start);
-      bone_marker.points.push_back(p_end);
+      if (filter_state[start_idx].is_initialized &&
+          filter_state[end_idx].is_initialized) {
+        geometry_msgs::msg::Point p_start = landmark_3d[start_idx];
+        geometry_msgs::msg::Point p_end = landmark_3d[end_idx];
+
+        bone_marker.points.push_back(p_start);
+        bone_marker.points.push_back(p_end);
+      }
+    } else {
+      if (keypoints_inside_func.find(start_idx) !=
+              keypoints_inside_func.end() &&
+          keypoints_inside_func.find(end_idx) != keypoints_inside_func.end()) {
+        geometry_msgs::msg::Point p_start =
+            keypoints_inside_func.at(start_idx).point;
+        geometry_msgs::msg::Point p_end =
+            keypoints_inside_func.at(end_idx).point;
+
+        bone_marker.points.push_back(p_start);
+        bone_marker.points.push_back(p_end);
+      }
     }
   }
 
@@ -915,112 +1004,43 @@ void SkeletonTrackerYolo::publish_skeleton_markers() {
   skeleton_marker_pub->publish(marker_array);
 }
 
-void SkeletonTrackerYolo::publish_keypoints_tf() {
+void SkeletonTrackerYolo::publish_keypoints_tf(
+    const std::map<int, skeleton_utils::landmark_3d> &keypoints,
+    bool print_keypoints) {
   geometry_msgs::msg::TransformStamped tf;
   auto parent_frame = camera_frame;
   tf.header.stamp = this->now();
   tf.header.frame_id = parent_frame;
 
-  for (int i = 0; i < num_landmarks; i++) {
+  if (!print_keypoints) {
+    for (int i = 0; i < num_landmarks; i++) {
 
-    if (!filter_state[i].is_initialized) {
-      continue;
-    }
-    tf.child_frame_id = image_constants::coco_keypoints[i];
-
-    tf.transform.translation.x = filter_state[i].internal_state.x();
-    tf.transform.translation.y = filter_state[i].internal_state.y();
-    tf.transform.translation.z = filter_state[i].internal_state.z();
-
-    tf_skel_publisher->sendTransform(tf);
-  }
-}
-
-// Returns depths in meters
-std::vector<double> SkeletonTrackerYolo::calculate_depths(
-    cv::Mat depth_image, std::vector<cv::Point2d> depth_pixels_normalized) {
-  std::vector<double> depths;
-  double height, width;
-  height = depth_image.rows;
-  width = depth_image.cols;
-  panda_interfaces::msg::DoubleArrayStamped arr;
-
-  for (auto depth_pixel_norm : depth_pixels_normalized) {
-    if (this->get_parameter("use_sim_time").as_bool()) {
-      depths.push_back(depth_image.at<float>(depth_pixel_norm.y * height,
-                                             depth_pixel_norm.x * width));
-    } else {
-
-      // uint16_t depth_raw = depth_image.at<uint16_t>(depth_pixel_norm.y *
-      // height,
-      //                                               depth_pixel_norm.x *
-      //                                               width);
-      // double depth = static_cast<double>(depth_raw) / 1000.0;
-      // depths.push_back(depth);
-      // arr.data.push_back(depth);
-
-      auto depth_median_raw = skeleton_utils::get_median_depth(
-          depth_image, depth_pixel_norm.y * height, depth_pixel_norm.x * width);
-      double depth = static_cast<double>(depth_median_raw) / 1000.0;
-      depths.push_back(depth);
-      arr.data.push_back(depth);
-    }
-  }
-  dbg_all_depths_pub->publish(arr);
-
-  return depths;
-}
-
-std::vector<std::optional<geometry_msgs::msg::Point>>
-SkeletonTrackerYolo::project_pixels_to_3d(std::vector<double> depths) {
-
-  std::vector<std::optional<geometry_msgs::msg::Point>> points;
-  geometry_msgs::msg::Point point_in_optical_frame;
-  geometry_msgs::msg::Point point_in_camera_frame;
-  int height = rgb_image_geom.cameraInfo().height;
-  int width = rgb_image_geom.cameraInfo().width;
-  double depth;
-  for (size_t i = 0; i < landmarks.size(); i++) {
-    cv::Point2d point;
-    point.x = landmarks[i].x * width;
-    point.y = landmarks[i].y * height;
-    cv::Point3d point_3d = rgb_image_geom.projectPixelTo3dRay(point);
-    if (depths[i] >= min_depth && depths[i] <= max_depth &&
-        !std::isnan(depths[i]) &&
-        landmarks[i].conf > transition_params.hallucination_threshold) {
-      depth = depths[i];
-      point_in_optical_frame.x = point_3d.x * depth;
-      point_in_optical_frame.y = point_3d.y * depth;
-      point_in_optical_frame.z = point_3d.z * depth;
-
-      // Rotation from optical frame to camera frame
-      point_in_camera_frame.x = point_in_optical_frame.z;
-      point_in_camera_frame.y = -point_in_optical_frame.x;
-      point_in_camera_frame.z = -point_in_optical_frame.y;
-
-      if (std::isnan(point_in_camera_frame.x) ||
-          std::isnan(point_in_camera_frame.y) ||
-          std::isnan(point_in_camera_frame.z)) {
-        RCLCPP_ERROR(this->get_logger(),
-                     "project_pixels_to_3d produced a nan!");
-        points.push_back(
-            std::optional<geometry_msgs::msg::Point>{}); // Push an invalid
-                                                         // optional
-      } else {
-        points.push_back(std::optional(point_in_camera_frame));
+      if (!filter_state[i].is_initialized) {
+        continue;
       }
-    } else {
-      points.push_back(std::optional<geometry_msgs::msg::Point>{});
+      tf.child_frame_id = image_constants::coco_keypoints[i];
+
+      tf.transform.translation.x = filter_state[i].internal_state.x();
+      tf.transform.translation.y = filter_state[i].internal_state.y();
+      tf.transform.translation.z = filter_state[i].internal_state.z();
+
+      tf_skel_publisher->sendTransform(tf);
     }
-    // std::cout << "3D point of " << image_constants::coco_keypoints[i] <<
-    // ":
-    // ("
-    //           << ros_point.x << ", " << ros_point.y << ", " <<
-    //           ros_point.z
-    //           << ")" << std::endl;
+  } else {
+    for (auto keypoint : keypoints) {
+      if (keypoint.first < num_landmarks) {
+        tf.child_frame_id = image_constants::coco_keypoints[keypoint.first];
+
+        tf.transform.translation.x = keypoint.second.point.x;
+        tf.transform.translation.y = keypoint.second.point.y;
+        tf.transform.translation.z = keypoint.second.point.z;
+
+        tf_skel_publisher->sendTransform(tf);
+      }
+    }
   }
-  return points;
 }
+
 cv::Mat SkeletonTrackerYolo::create_skel_img(
     Image background_scene,
     const std::map<int, skeleton_utils::landmark_3d> &keypoints) {

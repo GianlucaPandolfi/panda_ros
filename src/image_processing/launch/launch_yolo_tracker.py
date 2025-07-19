@@ -46,6 +46,11 @@ def generate_launch_description():
         default_value='40',
         description="Windows size for moving average")
 
+    filter = DeclareLaunchArgument(
+        'filter',
+        default_value='false',
+        description="Use or not the kalman filter for keypoints")
+
     skeleton_tracking = Node(
         package='image_processing',
         executable='skeleton_track_yolo',
@@ -59,6 +64,7 @@ def generate_launch_description():
             'hallucination_threshold': LaunchConfiguration('hallucination_threshold'),
             'single_keypoint_ma_confidence_threshold': LaunchConfiguration('single_keypoint_ma_confidence_threshold'),
             'MA_window_size': LaunchConfiguration('MA_window_size'),
+            'filter': LaunchConfiguration('filter'),
         }],
     )
 
@@ -71,5 +77,6 @@ def generate_launch_description():
         ma_confidence_threshold,
         hallucination_threshold,
         single_keypoint_ma_confidence_threshold,
+        filter,
         skeleton_tracking,
     ])

@@ -1,5 +1,7 @@
 from launch_ros.actions import Node
 from launch import LaunchDescription
+from launch_ros.actions import ComposableNodeContainer
+from launch_ros.descriptions import ComposableNode
 
 
 def generate_launch_description():
@@ -10,13 +12,30 @@ def generate_launch_description():
                 executable="kinect_ros2_node",
                 name="kinect_ros2",
             ),
+            ComposableNodeContainer(
+                name='depth_image_proc_container',
+                namespace='',
+                package='rclcpp_components',
+                executable='component_container',
+                composable_node_descriptions=[
+                    ComposableNode(
+                        package='depth_image_proc',
+                        plugin='depth_image_proc::RegisterNode',
+                        name='register_depth_node',
+                        remappings=[
+                            ('depth/image_rect', '/depth/image_raw'),
+                            ('rgb/camera_info', '/camera_info'),
+                        ],
+                    ),
+                ]
+            ),
             Node(
                 package='tf2_ros',
                 executable='static_transform_publisher',
                 name='static_tf_world_rgb',
                 arguments=[
                     '0.0', '0.0', '2.1',        # x y z
-                    '0.0', '0.0', '-1.5',        # roll pitch yaw (in radians)
+                    '-1.57', '0.0', '-1.57',        # roll pitch yaw (in radians)
                     'world', 'kinect_depth'  # parent_frame child_frame
                 ]
             ),
@@ -36,7 +55,7 @@ def generate_launch_description():
                 name='static_tf_world_rgb_optical',
                 arguments=[
                     '0.0', '0.0', '2.1',        # x y z
-                    '0.0', '0.0', '-1.5',        # roll pitch yaw (in radians)
+                    '0.0', '2.355', '0.78',        # roll pitch yaw (in radians)
                     'world', 'depth_optical_frame'  # parent_frame child_frame
                 ]
             ),
