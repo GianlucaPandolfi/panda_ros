@@ -532,10 +532,11 @@ public:
             y = jacobian_pinv * MD_1 *
                 (
 
-                    MD * desired_accel_vec + KD * error_twist -
-                    panda.computeHessianTimesQDot(current_joints_config_vec,
-                                                  current_joints_speed,
-                                                  frame_id_name)
+                    -KD * current_twist
+                    // -
+                    //   panda.computeHessianTimesQDot(current_joints_config_vec,
+                    //                                 current_joints_speed,
+                    //                                 frame_id_name)
 
                 );
           } else {
@@ -544,10 +545,11 @@ public:
                 (
 
                     MD * desired_accel_vec + KD * error_twist +
-                    KP * error_pose_vec -
-                    MD * panda.computeHessianTimesQDot(
-                             current_joints_config_vec, current_joints_speed,
-                             frame_id_name)
+                    KP * error_pose_vec
+                    // -
+                    //   MD * panda.computeHessianTimesQDot(
+                    //            current_joints_config_vec,
+                    //            current_joints_speed, frame_id_name)
 
                 );
           }
@@ -1355,10 +1357,9 @@ void ImpedanceController::control() {
         y = jacobian_pinv * MD_1 *
             (
 
-                MD * desired_accel_vec + KD * error_twist -
-                panda.computeHessianTimesQDot(current_joints_config_vec,
-                                              current_joints_speed,
-                                              frame_id_name)
+                -KD * current_twist - panda.computeHessianTimesQDot(
+                                          current_joints_config_vec,
+                                          current_joints_speed, frame_id_name)
 
             );
       } else {
@@ -1801,8 +1802,9 @@ void ImpedanceController::control_libfranka_sim() {
 
         y = jacobian_pinv * MD_1 *
             (
-
-                MD * desired_accel_vec + KD * error_twist
+                // The robot should not accept trajectory, so the desired
+                // commands are ignored
+                -KD * current_twist
                 // -
                 //       panda.computeHessianTimesQDot(current_joints_config_vec,
                 //                                     current_joints_speed,

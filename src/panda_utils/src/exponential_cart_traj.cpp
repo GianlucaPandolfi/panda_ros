@@ -1,0 +1,330 @@
+#include "geometry_msgs/msg/accel.hpp"
+#include "geometry_msgs/msg/pose.hpp"
+#include "geometry_msgs/msg/twist.hpp"
+#include "panda_interfaces/action/stop_traj.hpp"
+#include "panda_utils/constants.hpp"
+#include "rclcpp/rclcpp.hpp"
+#include "rclcpp_action/rclcpp_action.hpp"
+#include "realtime_tools/realtime_tools/realtime_publisher.hpp"
+#include <Eigen/src/Core/Matrix.h>
+#include <Eigen/src/Geometry/AngleAxis.h>
+#include <Eigen/src/Geometry/Quaternion.h>
+#include <cmath>
+#include <memory>
+#include <rclcpp/duration.hpp>
+#include <rclcpp/logging.hpp>
+#include <rclcpp/node.hpp>
+#include <rclcpp/publisher.hpp>
+#include <rclcpp/subscription.hpp>
+#include <rclcpp/subscription_wait_set_mask.hpp>
+#include <rclcpp/utilities.hpp>
+#include <rclcpp/wait_for_message.hpp>
+#include <rclcpp_action/rclcpp_action.hpp>
+#include <rclcpp_action/types.hpp>
+#include <string>
+#include <thread>
+
+using StopTraj = panda_interfaces::action::StopTraj;
+using GoalHandleStopTraj = rclcpp_action::ServerGoalHandle<StopTraj>;
+using namespace std::chrono_literals;
+
+struct decay_laws {
+  double lambda, mu, a, b, t_f;
+  double q_i_dot, q_i_ddot;
+  decay_laws(double t_f, double q_i_dot, double q_i_ddot, double lambda = 10,
+             double mu = 20)
+      : lambda(lambda), mu(mu), t_f(t_f), q_i_dot(q_i_dot), q_i_ddot(q_i_ddot) {
+    b = (-lambda * q_i_dot - q_i_ddot) / (mu - lambda);
+    a = q_i_dot - b;
+  }
+  double exponential_decay_velocity(double t) {
+    if (t <= 0.0)
+      return q_i_dot;
+    if (t >= t_f)
+      return 0.0;
+
+    return a * exp(-lambda * t) + b * exp(-mu * t);
+  }
+  double exponential_decay_acceleration(double t) {
+    if (t <= 0.0)
+      return q_i_ddot;
+    if (t >= t_f)
+      return 0.0;
+
+    return -lambda * a * exp(-lambda * t) - mu * b * exp(-mu * t);
+  }
+};
+
+class StopTrajectory : public rclcpp::Node {
+
+public:
+  StopTrajectory(const rclcpp::NodeOptions opt = rclcpp::NodeOptions())
+      : Node(panda_interface_names::exponential_stop_traj_node_name, opt) {
+
+    this->declare_parameter<double>("loop_rate_freq", 1000.0);
+
+    loop_rate_freq = this->get_parameter("loop_rate_freq").as_double();
+
+    auto handle_goal = [this](const rclcpp_action::GoalUUID uuid,
+                              std::shared_ptr<const StopTraj::Goal> goal) {
+      RCLCPP_INFO(this->get_logger(), "Received goal request");
+      initial_pose = last_pose;
+      initial_velocity = last_twist;
+      initial_acceleration = last_accel;
+      (void)uuid;
+      RCLCPP_INFO_STREAM(
+          this->get_logger(),
+          "Desired pose: Position: ["
+              << initial_pose.position.x << ", " << initial_pose.position.y
+              << ", " << initial_pose.position.z
+              << "] Orientation(w, x, y, z): [" << initial_pose.orientation.w
+              << ", " << initial_pose.orientation.x << ", "
+              << initial_pose.orientation.y << ", "
+              << initial_pose.orientation.z << "]");
+
+      RCLCPP_INFO_STREAM(this->get_logger(),
+                         "Initial twist: Linear: ["
+                             << initial_velocity.linear.x << ", "
+                             << initial_velocity.linear.y << ", "
+                             << initial_velocity.linear.z << "] Angular: ["
+                             << initial_velocity.angular.x << ", "
+                             << initial_velocity.angular.y << ", "
+                             << initial_velocity.angular.z << "]");
+
+      RCLCPP_INFO_STREAM(this->get_logger(),
+                         "Initial accelaration: Linear: ["
+                             << initial_acceleration.linear.x << ", "
+                             << initial_acceleration.linear.y << ", "
+                             << initial_acceleration.linear.z << "] Angular: ["
+                             << initial_acceleration.angular.x << ", "
+                             << initial_acceleration.angular.y << ", "
+                             << initial_acceleration.angular.z << "]");
+      RCLCPP_INFO_STREAM(this->get_logger(), "In " << goal->total_time << "s");
+      return rclcpp_action::GoalResponse::ACCEPT_AND_EXECUTE;
+    };
+
+    auto handle_cancel =
+        [this](const std::shared_ptr<rclcpp_action::ServerGoalHandle<StopTraj>>
+                   goal_handle) {
+          RCLCPP_INFO(this->get_logger(), "Received request to cancel goal");
+          (void)goal_handle;
+          return rclcpp_action::CancelResponse::ACCEPT;
+        };
+
+    auto handle_accepted =
+        [this](const std::shared_ptr<GoalHandleStopTraj> goal_handle) {
+          using namespace std::placeholders;
+
+          std::thread{std::bind(&StopTrajectory::execute, this, _1),
+                      goal_handle}
+              .detach();
+        };
+
+    this->action_traj_server = rclcpp_action::create_server<StopTraj>(
+        this, panda_interface_names::panda_exponential_stop_action_name,
+        handle_goal, handle_cancel, handle_accepted);
+
+    cmd_pose_pub = std::make_shared<
+        realtime_tools::RealtimePublisher<geometry_msgs::msg::Pose>>(
+        this->create_publisher<geometry_msgs::msg::Pose>(
+            panda_interface_names::panda_pose_cmd_topic_name,
+            panda_interface_names::DEFAULT_TOPIC_QOS));
+
+    cmd_twist_pub = std::make_shared<
+        realtime_tools::RealtimePublisher<geometry_msgs::msg::Twist>>(
+        this->create_publisher<geometry_msgs::msg::Twist>(
+            panda_interface_names::panda_twist_cmd_topic_name,
+            panda_interface_names::DEFAULT_TOPIC_QOS));
+
+    cmd_accel_pub = std::make_shared<
+        realtime_tools::RealtimePublisher<geometry_msgs::msg::Accel>>(
+        this->create_publisher<geometry_msgs::msg::Accel>(
+            panda_interface_names::panda_accel_cmd_topic_name,
+            panda_interface_names::DEFAULT_TOPIC_QOS));
+
+    auto last_pose_cb = [this](const geometry_msgs::msg::Pose msg) {
+      last_pose = msg;
+    };
+    auto last_twist_cb = [this](const geometry_msgs::msg::Twist msg) {
+      last_twist = msg;
+    };
+    auto last_accel_cb = [this](const geometry_msgs::msg::Accel msg) {
+      last_accel = msg;
+    };
+
+    cmd_pose_sub = this->create_subscription<geometry_msgs::msg::Pose>(
+        panda_interface_names::panda_pose_cmd_topic_name,
+        panda_interface_names::DEFAULT_TOPIC_QOS, last_pose_cb);
+    cmd_twist_sub = this->create_subscription<geometry_msgs::msg::Twist>(
+        panda_interface_names::panda_twist_cmd_topic_name,
+        panda_interface_names::DEFAULT_TOPIC_QOS, last_twist_cb);
+    cmd_accel_sub = this->create_subscription<geometry_msgs::msg::Accel>(
+        panda_interface_names::panda_accel_cmd_topic_name,
+        panda_interface_names::DEFAULT_TOPIC_QOS, last_accel_cb);
+  }
+
+private:
+  realtime_tools::RealtimePublisherSharedPtr<geometry_msgs::msg::Pose>
+      cmd_pose_pub;
+  realtime_tools::RealtimePublisherSharedPtr<geometry_msgs::msg::Twist>
+      cmd_twist_pub;
+  realtime_tools::RealtimePublisherSharedPtr<geometry_msgs::msg::Accel>
+      cmd_accel_pub;
+
+  rclcpp::Subscription<geometry_msgs::msg::Pose>::SharedPtr cmd_pose_sub;
+  rclcpp::Subscription<geometry_msgs::msg::Twist>::SharedPtr cmd_twist_sub;
+  rclcpp::Subscription<geometry_msgs::msg::Accel>::SharedPtr cmd_accel_sub;
+
+  geometry_msgs::msg::Pose last_pose;
+  geometry_msgs::msg::Twist last_twist;
+  geometry_msgs::msg::Accel last_accel;
+
+  geometry_msgs::msg::Pose initial_pose;
+  geometry_msgs::msg::Twist initial_velocity;
+  geometry_msgs::msg::Accel initial_acceleration;
+
+  rclcpp_action::Server<StopTraj>::SharedPtr action_traj_server;
+
+  double loop_rate_freq{};
+
+  void execute(const std::shared_ptr<GoalHandleStopTraj> goal_handle) {
+    RCLCPP_INFO(this->get_logger(), "Executing goal");
+    rclcpp::Rate loop_rate(loop_rate_freq, this->get_clock());
+
+    RCLCPP_DEBUG(this->get_logger(), "Getting goal");
+    const auto goal = goal_handle->get_goal();
+
+    // Initial orientation
+    Eigen::Quaterniond initial_quat{
+        initial_pose.orientation.w, initial_pose.orientation.x,
+        initial_pose.orientation.y, initial_pose.orientation.z};
+    initial_quat.normalize();
+
+    auto feedback = std::make_shared<StopTraj::Feedback>();
+    auto result = std::make_shared<StopTraj::Result>();
+
+    rclcpp::Time t0 = this->get_clock()->now();
+    rclcpp::Duration t = rclcpp::Duration(0, 0);
+
+    rclcpp::Duration traj_duration =
+        rclcpp::Duration::from_seconds(goal->total_time);
+    geometry_msgs::msg::Pose cmd_pose;
+    geometry_msgs::msg::Twist cmd_twist;
+    geometry_msgs::msg::Accel cmd_accel;
+
+    // Exponential decay laws
+    std::map<int, decay_laws> translation_laws;
+    std::map<int, decay_laws> orientation_laws;
+
+    translation_laws.emplace(0, decay_laws(goal->total_time,
+                                           initial_velocity.linear.x,
+                                           initial_acceleration.linear.x));
+    RCLCPP_INFO_STREAM(this->get_logger(),
+                       "First translation law: a = "
+                           << translation_laws.at(0).a
+                           << ", b = " << translation_laws.at(0).b
+                           << ", mu = " << translation_laws.at(0).mu
+                           << ", lambda = " << translation_laws.at(0).lambda);
+    translation_laws.emplace(1, decay_laws(goal->total_time,
+                                           initial_velocity.linear.y,
+                                           initial_acceleration.linear.y));
+    translation_laws.emplace(2, decay_laws(goal->total_time,
+                                           initial_velocity.linear.z,
+                                           initial_acceleration.linear.z));
+
+    orientation_laws.emplace(0, decay_laws(goal->total_time,
+                                           initial_velocity.angular.x,
+                                           initial_acceleration.angular.x));
+    orientation_laws.emplace(1, decay_laws(goal->total_time,
+                                           initial_velocity.angular.y,
+                                           initial_acceleration.angular.y));
+    orientation_laws.emplace(2, decay_laws(goal->total_time,
+                                           initial_velocity.angular.z,
+                                           initial_acceleration.angular.z));
+
+    RCLCPP_DEBUG(this->get_logger(), "Entering while");
+    while (rclcpp::ok() && t < traj_duration) {
+      if (goal_handle->is_canceling()) {
+        auto result = std::make_shared<StopTraj::Result>();
+        result->completed = false;
+        goal_handle->canceled(result);
+        RCLCPP_INFO(this->get_logger(), "Goal canceled");
+        return;
+      }
+      t = this->get_clock()->now() - t0;
+      RCLCPP_DEBUG(this->get_logger(), "Time now %f", t.seconds());
+
+      RCLCPP_DEBUG(this->get_logger(), "Uploading next pose");
+
+      // Calculating position
+      cmd_pose.position = initial_pose.position;
+
+      cmd_twist.linear.x =
+          translation_laws.at(0).exponential_decay_velocity(t.seconds());
+      cmd_twist.linear.y =
+          translation_laws.at(1).exponential_decay_velocity(t.seconds());
+      cmd_twist.linear.z =
+          translation_laws.at(2).exponential_decay_velocity(t.seconds());
+
+      cmd_accel.linear.x =
+          translation_laws.at(0).exponential_decay_acceleration(t.seconds());
+      cmd_accel.linear.y =
+          translation_laws.at(1).exponential_decay_acceleration(t.seconds());
+      cmd_accel.linear.z =
+          translation_laws.at(2).exponential_decay_acceleration(t.seconds());
+
+      // Orientation
+      cmd_pose.orientation.x = initial_quat.x();
+      cmd_pose.orientation.y = initial_quat.y();
+      cmd_pose.orientation.z = initial_quat.z();
+      cmd_pose.orientation.w = initial_quat.w();
+
+      cmd_twist.angular.x =
+          orientation_laws.at(0).exponential_decay_velocity(t.seconds());
+      cmd_twist.angular.y =
+          orientation_laws.at(1).exponential_decay_velocity(t.seconds());
+      cmd_twist.angular.z =
+          orientation_laws.at(2).exponential_decay_velocity(t.seconds());
+
+      cmd_accel.angular.x =
+          orientation_laws.at(0).exponential_decay_acceleration(t.seconds());
+      cmd_accel.angular.y =
+          orientation_laws.at(1).exponential_decay_acceleration(t.seconds());
+      cmd_accel.angular.z =
+          orientation_laws.at(2).exponential_decay_acceleration(t.seconds());
+
+      RCLCPP_DEBUG_ONCE(this->get_logger(), "Assigning time left");
+      feedback->time_left = (traj_duration - t).seconds();
+
+      RCLCPP_DEBUG_ONCE(this->get_logger(), "Publishing feedback");
+      goal_handle->publish_feedback(feedback);
+
+      RCLCPP_DEBUG_ONCE(this->get_logger(), "Publish command");
+
+      cmd_pose_pub->tryPublish(cmd_pose);
+      cmd_twist_pub->tryPublish(cmd_twist);
+      cmd_accel_pub->tryPublish(cmd_accel);
+
+      // Sleep
+      //
+      RCLCPP_DEBUG_ONCE(this->get_logger(), "Sleep");
+      loop_rate.sleep();
+    }
+
+    // Check if goal is done
+    if (rclcpp::ok() && goal_handle->is_active()) {
+      goal_handle->succeed(result);
+      RCLCPP_INFO(this->get_logger(), "Goal succeeded");
+    } else {
+      rclcpp::shutdown();
+    }
+  }
+};
+
+int main(int argc, char **argv) {
+  rclcpp::init(argc, argv);
+  auto node = std::make_shared<StopTrajectory>();
+  rclcpp::spin(node);
+  rclcpp::shutdown();
+  return 0;
+}

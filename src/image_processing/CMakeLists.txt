@@ -23,6 +23,7 @@ find_package(tf2_ros REQUIRED)
 find_package(panda_interfaces REQUIRED)
 find_package(visualization_msgs REQUIRED)
 find_package(yolo_msgs REQUIRED)
+find_package(tf2_geometry_msgs REQUIRED)
 
 
 include_directories(
@@ -67,7 +68,7 @@ target_link_libraries(skeleton_track
 )
 
 add_executable(skeleton_track_yolo ./src/skeleton_tracker_yolo.cpp)
-ament_target_dependencies(skeleton_track_yolo OpenCV ament_index_cpp rclcpp sensor_msgs cv_bridge image_geometry realtime_tools tf2 tf2_ros tf2_eigen panda_interfaces visualization_msgs yolo_msgs)
+ament_target_dependencies(skeleton_track_yolo OpenCV ament_index_cpp rclcpp sensor_msgs cv_bridge image_geometry realtime_tools tf2 tf2_ros tf2_eigen panda_interfaces visualization_msgs yolo_msgs tf2_geometry_msgs)
 target_link_libraries(skeleton_track_yolo
   onnxruntime
   skeleton_infer
@@ -98,6 +99,8 @@ install(
     include/
   DESTINATION share/${PROJECT_NAME}/include
 )
+
+ament_export_include_directories(include)
 
 if(BUILD_TESTING)
   find_package(ament_lint_auto REQUIRED)

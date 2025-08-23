@@ -34,6 +34,9 @@ rosidl_generate_interfaces(${PROJECT_NAME}
   "./msg/HumanDetected.msg"
   "./msg/DoubleArrayStamped.msg"
   "./msg/DoubleStamped.msg"
+  "./msg/FloatStringPair.msg"
+  "./msg/BodyLengths.msg"
+  "./action/StopTraj.action"
   DEPENDENCIES tf2_msgs geometry_msgs std_msgs
 )
 

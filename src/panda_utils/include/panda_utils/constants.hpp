@@ -23,6 +23,8 @@ const std::string inverse_dynamics_controller_node_name{
 const std::string controller_manager_node_name{"controller_manager"};
 const std::string clik_node_name{"clik_cmd_pub"};
 const std::string cart_traj_node_name{"cart_traj_server"};
+const std::string exponential_stop_traj_node_name{"exponential_stop_server"};
+const std::string loop_cart_traj_node_name{"loop_cart_traj_server"};
 
 /////////////////////////////////////////////////////////////
 const std::string joints_cmd_pos_service_name{"send_joints_pos_cmd"};
@@ -49,6 +51,7 @@ const std::string pose_error_topic_name{"/pose_error"};
 const std::string panda_traj_move_action_name{"joint_traj_action"};
 const std::string panda_cart_move_action_name{"cart_traj_action"};
 const std::string panda_cart_loop_action_name{"loop_cart_traj_action"};
+const std::string panda_exponential_stop_action_name{"exponential_stop_action"};
 
 /////////////////////////////////////////////////////////////
 const auto bridge_effort_cmd_topic_names = {
@@ -64,6 +67,11 @@ const auto bridge_pos_cmd_topic_names = {
 const std::vector<std::string> panda_joint_names = {
     "fr3_joint1", "fr3_joint2", "fr3_joint3", "fr3_joint4",
     "fr3_joint5", "fr3_joint6", "fr3_joint7",
+};
+
+const std::vector<std::string> panda_link_names = {
+    "fr3_link0", "fr3_link1", "fr3_link2", "fr3_link3", "fr3_link4",
+    "fr3_link5", "fr3_link6", "fr3_link7", "fr3_link8",
 };
 
 const int DEFAULT_TOPIC_QOS = 10;

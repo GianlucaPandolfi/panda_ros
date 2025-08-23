@@ -172,6 +172,13 @@ private:
     rclcpp::Duration traj_duration = rclcpp::Duration(goal->total_time, 0);
 
     while (rclcpp::ok() && t < traj_duration) {
+      if (goal_handle->is_canceling()) {
+        auto result = std::make_shared<TrajMove::Result>();
+        result->completed = false;
+        goal_handle->canceled(result);
+        RCLCPP_INFO(this->get_logger(), "Goal canceled");
+        return;
+      }
       t = this->get_clock()->now() - t0;
       // Get next JointState
       panda_interfaces::msg::JointsCommand cmd;
@@ -203,7 +210,7 @@ private:
     }
 
     // Check if goal is done
-    if (rclcpp::ok()) {
+    if (rclcpp::ok() && goal_handle->is_active()) {
       result->completed = true;
       goal_handle->succeed(result);
       RCLCPP_INFO(this->get_logger(), "Goal succeeded");

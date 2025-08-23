@@ -51,6 +51,16 @@ def generate_launch_description():
         default_value='false',
         description="Use or not the kalman filter for keypoints")
 
+    predict = DeclareLaunchArgument(
+        'predict',
+        default_value='true',
+        description="Use kalman filter predictions when measure is uncertain")
+
+    debug = DeclareLaunchArgument(
+        'debug',
+        default_value='false',
+        description="Print debug info")
+
     skeleton_tracking = Node(
         package='image_processing',
         executable='skeleton_track_yolo',
@@ -65,6 +75,8 @@ def generate_launch_description():
             'single_keypoint_ma_confidence_threshold': LaunchConfiguration('single_keypoint_ma_confidence_threshold'),
             'MA_window_size': LaunchConfiguration('MA_window_size'),
             'filter': LaunchConfiguration('filter'),
+            'predict': LaunchConfiguration('predict'),
+            'debug': LaunchConfiguration('debug'),
         }],
     )
 
@@ -78,5 +90,7 @@ def generate_launch_description():
         hallucination_threshold,
         single_keypoint_ma_confidence_threshold,
         filter,
+        predict,
+        debug,
         skeleton_tracking,
     ])

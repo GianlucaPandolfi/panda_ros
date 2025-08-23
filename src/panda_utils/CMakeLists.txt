@@ -28,7 +28,9 @@ include_directories(
   /opt/ros/jazzy/include
   /opt/ros/jazzy/include/pinocchio
   ~/libfranka/include/
+  ${CMAKE_CURRENT_SOURCE_DIR}/../image_processing/include
 )
+
 
 link_directories(
   ~/libfranka/build/
@@ -83,6 +85,12 @@ ament_target_dependencies(joint_traj rclcpp panda_interfaces std_msgs tf2_eigen 
 add_executable(cart_traj ./src/cart_traj.cpp)
 ament_target_dependencies(cart_traj rclcpp panda_interfaces std_msgs tf2_eigen tf2 tf2_msgs sensor_msgs)
 
+add_executable(loop_cart_traj ./src/loop_cart_traj.cpp)
+ament_target_dependencies(loop_cart_traj rclcpp panda_interfaces std_msgs tf2_eigen tf2 tf2_msgs sensor_msgs)
+
+add_executable(stop_traj ./src/exponential_cart_traj.cpp)
+ament_target_dependencies(stop_traj rclcpp panda_interfaces std_msgs tf2_eigen tf2 tf2_msgs sensor_msgs)
+
 add_executable(clik_cmd_pub ./src/clik_cmd_publisher.cpp)
 ament_target_dependencies(clik_cmd_pub rclcpp panda_interfaces std_msgs tf2_eigen tf2 tf2_msgs sensor_msgs rclcpp_lifecycle ament_index_cpp)
 target_link_libraries(clik_cmd_pub robot_model)
@@ -123,6 +131,8 @@ install(TARGETS
   send_joints_effort_simple_client
   joint_traj
   cart_traj
+  stop_traj
+  loop_cart_traj
   clik_cmd_pub
   demo_node
   demo

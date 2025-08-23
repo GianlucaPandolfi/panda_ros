@@ -6,9 +6,7 @@ from launch.actions import DeclareLaunchArgument
 
 def generate_launch_description():
 
-    use_sim_time = LaunchConfiguration('use_sim_time', default='true')
-
-    DeclareLaunchArgument(
+    use_sim_time = DeclareLaunchArgument(
         'use_sim_time',
         default_value='true',
         description='Use simulation (Gazebo) clock if true')
@@ -106,21 +104,12 @@ def generate_launch_description():
         default_value='1.0',
         description='Secondary task gain'
     )
-
-    pos_cmds_joints = Node(
-        package='panda_utils',
-        executable='send_joints_cmd_server',
-        name='pos_cmds_joints',
-        parameters=[{
-            'use_sim_time': use_sim_time,
-        }],
-    )
     effort_cmd_server = Node(
         package='panda_utils',
         executable='send_joints_effort_server',
         name='effort_cmd_server',
         parameters=[{
-            'use_sim_time': use_sim_time,
+            'use_sim_time': LaunchConfiguration('use_sim_time'),
         }],
     )
     joint_traj_server = Node(
@@ -128,7 +117,7 @@ def generate_launch_description():
         executable='joint_traj',
         name='joint_traj_server',
         parameters=[{
-            'use_sim_time': use_sim_time,
+            'use_sim_time': LaunchConfiguration('use_sim_time'),
         }],
     )
     cart_traj_server = Node(
@@ -136,7 +125,25 @@ def generate_launch_description():
         executable='cart_traj',
         name='cart_traj_server',
         parameters=[{
-            'use_sim_time': use_sim_time,
+            'use_sim_time': LaunchConfiguration('use_sim_time'),
+            # 'loop_rate_freq': loop_rate_freq,
+        }],
+    )
+    stop_traj_server = Node(
+        package='panda_utils',
+        executable='stop_traj',
+        name='stop_traj_server',
+        parameters=[{
+            'use_sim_time': LaunchConfiguration('use_sim_time'),
+            # 'loop_rate_freq': loop_rate_freq,
+        }],
+    )
+    loop_cart_traj_server = Node(
+        package='panda_utils',
+        executable='loop_cart_traj',
+        name='loop_cart_traj_server',
+        parameters=[{
+            'use_sim_time': LaunchConfiguration('use_sim_time'),
             # 'loop_rate_freq': loop_rate_freq,
         }],
     )
@@ -145,21 +152,9 @@ def generate_launch_description():
         executable='clik_cmd_pub',
         name='clik_cmd_pub',
         parameters=[{
-            'use_sim_time': use_sim_time,
+            'use_sim_time': LaunchConfiguration('use_sim_time'),
             'ts': LaunchConfiguration('clik_ts'),
             'gamma': LaunchConfiguration('clik_gamma'),
-        }],
-    )
-    pd_grav_controller = Node(
-        package='panda_utils',
-        executable='pd_grav_controller',
-        name='pd_grav_controller',
-        parameters=[{
-            'use_sim_time': use_sim_time,
-            'Kp': LaunchConfiguration('controller_kp'),
-            'Kd': LaunchConfiguration('controller_kd'),
-            'control_freq': LaunchConfiguration('controller_rate'),
-            'clamp': LaunchConfiguration('clamp_effort_control')
         }],
     )
     inverse_dynamics_controller = Node(
@@ -167,7 +162,7 @@ def generate_launch_description():
         executable='inverse_dynamics_controller',
         name='inverse_dynamics_controller',
         parameters=[{
-            'use_sim_time': use_sim_time,
+            'use_sim_time': LaunchConfiguration('use_sim_time'),
             'Kp': LaunchConfiguration('controller_kp'),
             'Kd': LaunchConfiguration('controller_kd'),
             'Md': LaunchConfiguration('controller_md'),
@@ -185,7 +180,7 @@ def generate_launch_description():
         executable='impedance_controller',
         name='impedance_controller',
         parameters=[{
-            'use_sim_time': use_sim_time,
+            'use_sim_time': LaunchConfiguration('use_sim_time'),
             'Kp': LaunchConfiguration('controller_kp'),
             'Kd': LaunchConfiguration('controller_kd'),
             'Md': LaunchConfiguration('controller_md'),
@@ -201,16 +196,9 @@ def generate_launch_description():
 
         }],
     )
-    controller_manager = Node(
-        package='panda_utils',
-        executable='controller_manager',
-        name='controller_manager',
-        parameters=[{
-            'use_sim_time': use_sim_time,
-        }],
-    )
 
     return LaunchDescription([
+        use_sim_time,
         controller_kp,
         controller_kd,
         controller_md,
@@ -230,6 +218,8 @@ def generate_launch_description():
         effort_cmd_server,
         joint_traj_server,
         cart_traj_server,
+        stop_traj_server,
+        loop_cart_traj_server,
         clik_cmd_pub,
         inverse_dynamics_controller,
         impedance_controller,

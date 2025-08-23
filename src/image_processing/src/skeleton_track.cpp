@@ -602,7 +602,8 @@ private:
 
       if (point.has_value() &&
           current_state.ma_conf >
-              transition_params.single_keypoint_ma_confidence_threshold) {
+              transition_params.single_keypoint_ma_confidence_threshold &&
+          landmark.conf >= transition_params.hallucination_threshold) {
         current_state.invalid_keypoint_frames = 0;
       } else {
         current_state.invalid_keypoint_frames += 1;

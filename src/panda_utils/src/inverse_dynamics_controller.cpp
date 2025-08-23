@@ -428,8 +428,7 @@ public:
         Eigen::Vector<double, 7> y;
         // If compliance mode: Kp = 0
         if (compliance_mode.load()) {
-          y = desired_joints_accelerations +
-              KD * (desired_joints_velocity - current_joints_speed);
+          y = -KD * current_joints_speed;
         } else {
           y = desired_joints_accelerations +
               KD * (desired_joints_velocity - current_joints_speed) +
@@ -949,8 +948,7 @@ void InverseDynamicsController::control() {
       y_accel = mass_matrix * Md * desired_joints_accelerations;
 
       if (compliance_mode.load()) {
-        y = Md * desired_joints_accelerations +
-            KD * (desired_joints_velocity - current_joints_speed);
+        y = -KD * current_joints_speed;
       } else {
         y = Md * desired_joints_accelerations + KD * (err_vel) + KP * (err_pos);
       }
@@ -1178,8 +1176,7 @@ void InverseDynamicsController::control_libfranka_sim() {
       y_accel = mass_matrix * Md * desired_joints_accelerations;
 
       if (compliance_mode.load()) {
-        y = Md * desired_joints_accelerations +
-            KD * (desired_joints_velocity - current_joints_speed);
+        y = -KD * current_joints_speed;
       } else {
         y = Md * desired_joints_accelerations + KD * (err_vel) + KP * (err_pos);
       }

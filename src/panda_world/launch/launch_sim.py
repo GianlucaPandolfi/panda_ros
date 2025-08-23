@@ -117,6 +117,15 @@ def generate_launch_description():
         output='screen'
     )
 
+    depth_img_converter = Node(
+        package='panda_world',
+        executable='depth_converter',
+        parameters=[{
+            'use_sim_time': use_sim_time
+        }],
+        output='screen'
+    )
+
     world = LaunchConfiguration('world')
     file = LaunchConfiguration('file')
     model_string = LaunchConfiguration('model_string')
@@ -205,6 +214,17 @@ def generate_launch_description():
         output='screen'
     )
 
+    camera_transform = Node(
+        package='tf2_ros',
+        executable='static_transform_publisher',
+        name='static_tf_world_rgb',
+        arguments=[
+            '0.0', '0.0', '0.0',
+            '-1.57', '0.0', '-1.57',
+            'kinect_rgb', 'camera/kinect_rgb/rgbd_camera'  # parent_frame child_frame
+        ]
+    )
+
     # Create the launch description and populate
     ld = LaunchDescription()
 
@@ -225,6 +245,8 @@ def generate_launch_description():
     ld.add_action(joint_state_publisher_patched)
     ld.add_action(torque_publisher)
     ld.add_action(rviz_launch_arg)
+    ld.add_action(depth_img_converter)
+    ld.add_action(camera_transform)
     ld.add_action(rviz)
 
     return ld

@@ -107,6 +107,10 @@ public:
         [this](const std::shared_ptr<rclcpp_action::ServerGoalHandle<CartTraj>>
                    goal_handle) {
           RCLCPP_INFO(this->get_logger(), "Received request to cancel goal");
+          // CartTraj::Result::SharedPtr result =
+          //     std::make_shared<CartTraj::Result>();
+          // result->completed = false;
+          // goal_handle->canceled(result);
           (void)goal_handle;
           return rclcpp_action::CancelResponse::ACCEPT;
         };
@@ -199,6 +203,13 @@ private:
 
     RCLCPP_DEBUG(this->get_logger(), "Entering while");
     while (rclcpp::ok() && t < traj_duration) {
+      if (goal_handle->is_canceling()) {
+        auto result = std::make_shared<CartTraj::Result>();
+        result->completed = false;
+        goal_handle->canceled(result);
+        RCLCPP_INFO(this->get_logger(), "Goal canceled");
+        return; 
+      }
       t = this->get_clock()->now() - t0;
       RCLCPP_DEBUG(this->get_logger(), "Time now %f", t.seconds());
 
@@ -294,7 +305,7 @@ private:
     }
 
     // Check if goal is done
-    if (rclcpp::ok()) {
+    if (rclcpp::ok() && goal_handle->is_active()) {
       goal_handle->succeed(result);
       RCLCPP_INFO(this->get_logger(), "Goal succeeded");
     } else {

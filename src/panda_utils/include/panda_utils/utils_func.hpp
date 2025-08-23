@@ -8,11 +8,12 @@
 
 namespace indexes {
 
-double joint_limit_index(const Eigen::Vector<double, 7> &current_joint_config,
-                         const Eigen::Vector<double, 7> &joint_min_limits =
-                             panda_constants::joint_min_limits,
-                         const Eigen::Vector<double, 7> &joint_max_limits =
-                             panda_constants::joint_max_limits) {
+inline double
+joint_limit_index(const Eigen::Vector<double, 7> &current_joint_config,
+                  const Eigen::Vector<double, 7> &joint_min_limits =
+                      panda_constants::joint_min_limits,
+                  const Eigen::Vector<double, 7> &joint_max_limits =
+                      panda_constants::joint_max_limits) {
   double index = 0;
   for (int i = 0; i < 7; i++) {
     index = index + 1 / (current_joint_config[i] - joint_min_limits[i]) +
@@ -21,7 +22,7 @@ double joint_limit_index(const Eigen::Vector<double, 7> &current_joint_config,
   return index;
 }
 
-Eigen::Vector<double, 7>
+inline Eigen::Vector<double, 7>
 joint_limit_index_grad(const Eigen::Vector<double, 7> &current_joint_config,
                        const Eigen::Vector<double, 7> &joint_min_limits =
                            panda_constants::joint_min_limits,
@@ -49,11 +50,11 @@ joint_limit_index_grad(const Eigen::Vector<double, 7> &current_joint_config,
   return limit_index_grad;
 }
 
-double manip_index(const Eigen::Matrix<double, 6, 7> &jacob) {
+inline double manip_index(const Eigen::Matrix<double, 6, 7> &jacob) {
   return std::sqrt((jacob * jacob.transpose()).determinant());
 }
 
-Eigen::Vector<double, 7> manip_grad(
+inline Eigen::Vector<double, 7> manip_grad(
     const Eigen::Vector<double, 7> &current_joint_config,
     std::function<Eigen::Matrix<double, 6, 7>(const Eigen::Vector<double, 7> &)>
         jacob_calc,
@@ -79,16 +80,40 @@ Eigen::Vector<double, 7> manip_grad(
 
 namespace geom_utils {
 
-// Calculate the euclidean distance between 2 transforms
-inline double euclidean_distance(tf2::Transform transform_msg) {
-  tf2::Transform transform{};
-  tf2::fromMsg(transform_msg, transform);
-
-  return transform.getOrigin().length();
+inline double distance(geometry_msgs::msg::Point p1,
+                       geometry_msgs::msg::Point p2) {
+  return std::sqrt(pow(p1.x - p2.x, 2) + pow(p1.y - p2.y, 2) +
+                   pow(p1.z - p2.z, 2));
 }
 
-std::array<double, 16>
-get_transform_matrix(const geometry_msgs::msg::Pose &pose_msg) {
+inline double distance(geometry_msgs::msg::TransformStamped tf) {
+  geometry_msgs::msg::Point p1{};
+  geometry_msgs::msg::Point p2;
+
+  p2.x = tf.transform.translation.x;
+  p2.y = tf.transform.translation.y;
+  p2.z = tf.transform.translation.z;
+
+  return distance(p1, p2);
+}
+
+inline double distance(geometry_msgs::msg::TransformStamped tf1, geometry_msgs::msg::TransformStamped tf2) {
+  geometry_msgs::msg::Point p1;
+  geometry_msgs::msg::Point p2;
+
+  p1.x = tf1.transform.translation.x;
+  p1.y = tf1.transform.translation.y;
+  p1.z = tf1.transform.translation.z;
+
+  p2.x = tf2.transform.translation.x;
+  p2.y = tf2.transform.translation.y;
+  p2.z = tf2.transform.translation.z;
+
+  return distance(p1, p2);
+}
+
+std::array<double, 16> inline get_transform_matrix(
+    const geometry_msgs::msg::Pose &pose_msg) {
   std::array<double, 16> transform_mat;
 
   // Convert quaternion to rotation matrix
@@ -111,7 +136,8 @@ get_transform_matrix(const geometry_msgs::msg::Pose &pose_msg) {
   return transform_mat;
 }
 
-geometry_msgs::msg::Pose get_pose(const std::array<double, 16> &transform_mat) {
+inline geometry_msgs::msg::Pose
+get_pose(const std::array<double, 16> &transform_mat) {
   Eigen::Map<const Eigen::Matrix4d> eigen_matrix(transform_mat.data());
 
   geometry_msgs::msg::Pose pose_msg;
@@ -133,7 +159,7 @@ geometry_msgs::msg::Pose get_pose(const std::array<double, 16> &transform_mat) {
   return pose_msg;
 }
 
-Eigen::Matrix<double, 6, 7>
+inline Eigen::Matrix<double, 6, 7>
 get_jacobian(const std::array<double, 42> &jacob_raw) {
 
   Eigen::Matrix<double, 6, 7> jacobian;

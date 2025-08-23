@@ -6,7 +6,7 @@
 <robot name="camera">
 
   <link name="world"/>
-<link name="camera_link">
+<link name="kinect_rgb">
     <visual>
         <geometry><box size="0.05 0.05 0.05"/></geometry>
     </visual>
@@ -19,16 +19,21 @@
     </inertial>
   </link>
 
-  <joint name="camera_joint" type="fixed">
-    <parent link="world"/>
-    <child link="camera_link"/>
-    <!-- <origin xyz="0.5 1 2.2" rpy="0.1 0.9 -1.57"/> -->
-    <origin xyz="0 1.5 3.2" rpy="0.1 0.9 -1.57"/>
+  <link name="kinect_depth"/>
+
+  <joint name="camera_depth_joint" type="fixed">
+    <parent link="kinect_rgb"/>
+    <child link="kinect_depth"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
   </joint>
 
+  <joint name="camera_joint" type="fixed">
+    <parent link="world"/>
+    <child link="kinect_rgb"/>
+    <origin xyz="0 2.5 3.2" rpy="0.1 0.9 -1.57"/>
+  </joint>
 
-
-    <gazebo reference="camera_link">
+    <gazebo reference="kinect_rgb">
       <sensor name="rgbd_camera" type="rgbd_camera">
         <update_rate>30.0</update_rate>
         <topic>rgbd_camera</topic>
