@@ -475,10 +475,12 @@ public:
 
       // Coefficient for dynamic lambda damping
       double alpha = this->get_parameter("alpha").as_double();
+      double k_max = this->get_parameter("k_max").as_double();
+      double eps = this->get_parameter("eps").as_double();
 
-      robot_control_callback = [this, KP, KD, alpha, MD,
-                                MD_1](const franka::RobotState &state,
-                                      franka::Duration) -> franka::Torques {
+      robot_control_callback = [this, KP, KD, alpha, MD, MD_1, k_max,
+                                eps](const franka::RobotState &state,
+                                     franka::Duration) -> franka::Torques {
         if (!(start_flag.load() && rclcpp::ok())) {
           // Send last commanded joint effort command
           return franka::MotionFinished(franka::Torques(state.tau_J_d));
@@ -575,7 +577,8 @@ public:
         double sigma_min = svd.singularValues().tail(1)(0);
 
         // DYNAMIC LAMBDA BASED ON MINIMUM SINGULAR VALUE
-        double lambda = std::exp(-alpha * sigma_min);
+        double lambda = k_max * (1 - pow(sigma_min, 2) / pow(eps, 2));
+        lambda = (sigma_min >= eps ? 0.0 : lambda);
         Eigen::Matrix<double, 7, 6> jacobian_pinv =
             compute_jacob_pseudoinv(jacobian, lambda);
 
@@ -620,7 +623,7 @@ public:
           std::lock_guard<std::mutex> lock(desired_accel_mutex);
           if (compliance_mode.load()) {
 
-            h_e = jacobian_pinv.transpose() * extern_tau;
+            h_e = jacobian_pinv.transpose() * tau_ext;
             y = jacobian_pinv * MD_1 *
                 (
 
@@ -1434,7 +1437,7 @@ void ImpedanceController::control() {
 
   double task_gain = this->get_parameter("task_gain").as_double();
 
-  double orient_scale = 5;
+  double orient_scale = 0.5;
   Eigen::Vector<double, 6> KP_{
       Kp, Kp, Kp, Kp * orient_scale, Kp * orient_scale, Kp * orient_scale};
   Eigen::Matrix<double, 6, 6> KP = Eigen::Matrix<double, 6, 6>::Identity();
@@ -1501,20 +1504,8 @@ void ImpedanceController::control() {
       desired_quat.z() = desired_pose->orientation.z;
       desired_quat.normalize();
 
-      // Calculate quaternion_des_dot
-      // double eta =
-      //     -1 / 2 * desired_quat.vec().transpose() *
-      //     desired_twist_vec.tail(3);
-      // auto epsilon =
-      //     1 / 2 *
-      //     (desired_quat.w() * Eigen::Matrix<double, 3, 3>::Identity() -
-      //      s_operator(desired_quat)) *
-      //     desired_twist_vec.tail(3);
-      // quat_des_dot.w() = eta;
-      // quat_des_dot.vec() = epsilon;
-
       error_quat = desired_quat * current_quat.inverse();
-      Eigen::AngleAxisd err_angle_axis{error_quat};
+      error_quat.normalize();
 
       error_pose_vec(0) =
           desired_pose->position.x - current_pose_tmp.position.x;
@@ -1523,17 +1514,10 @@ void ImpedanceController::control() {
       error_pose_vec(2) =
           desired_pose->position.z - current_pose_tmp.position.z;
 
-      // Axis angle error
-      // error_pose_vec.tail(3) = err_angle_axis.axis() *
-      // err_angle_axis.angle();
-
       // Quaternion vec error
-      // TODO: orientation error is expressed wrt end affector frame, to have
-      // consistency between the error and the jacobian of the EE wrt base i
-      // have to rotate it in base frame
-      error_pose_vec(3) = error_quat.x();
-      error_pose_vec(4) = error_quat.y();
-      error_pose_vec(5) = error_quat.z();
+      error_pose_vec(3) = 2 * error_quat.x();
+      error_pose_vec(4) = 2 * error_quat.y();
+      error_pose_vec(5) = 2 * error_quat.z();
     }
 
     // Update robot model
@@ -1546,6 +1530,17 @@ void ImpedanceController::control() {
     } else {
       jacobian = panda.getGeometricalJacobian(frame_id_name);
     }
+
+    Eigen::Matrix<double, 6, 6> T_a;
+    // {
+    //   Eigen::Vector3d euler_angles =
+    //   current_quat.toRotationMatrix().eulerAngles(2, 1, 2);
+    //   auto T = computeTMatrix(euler_angles);
+    //   T_a.setZero();
+    //   T_a.block<3, 3>(0, 0) = Eigen::Matrix3d::Identity();
+    //   T_a.block<3, 3>(3, 3) = T.inverse();
+    //   jacobian = T_a.inverse() * jacobian;
+    // }
 
     // Calculate jacobian SVD
     Eigen::JacobiSVD<Eigen::MatrixXd> svd(jacobian, Eigen::ComputeThinU |
@@ -1710,7 +1705,6 @@ void ImpedanceController::control_libfranka_sim() {
   Eigen::Vector<double, 7> current_joints_speed;
   Eigen::Vector<double, 6> current_twist;
   Eigen::Vector<double, 6> error_twist;
-  Eigen::Vector<double, 7> tau_ext;
   Eigen::Vector<double, 6> h_e;
   PoseStamped pose_debug;
   TwistStamped twist_debug;
@@ -1792,7 +1786,7 @@ void ImpedanceController::control_libfranka_sim() {
 
       for (size_t i = 0; i < current_joint_config->position.size(); i++) {
         current_joints_speed[i] = current_joint_config->velocity[i];
-        state.dq[i] = current_joint_config->position[i];
+        state.dq[i] = current_joint_config->velocity[i];
       }
     }
 
@@ -1841,14 +1835,15 @@ void ImpedanceController::control_libfranka_sim() {
       desired_quat.normalize();
 
       error_quat = desired_quat * current_quat.inverse();
-      Eigen::AngleAxisd err_angle_axis{error_quat};
 
       error_pose_vec(0) = desired_pose->position.x - current_pose.position.x;
       error_pose_vec(1) = desired_pose->position.y - current_pose.position.y;
       error_pose_vec(2) = desired_pose->position.z - current_pose.position.z;
 
       // Axis angle error
-      error_pose_vec.tail(3) = err_angle_axis.axis() * err_angle_axis.angle();
+      error_pose_vec(3) = 2 * error_quat.x();
+      error_pose_vec(4) = 2 * error_quat.y();
+      error_pose_vec(5) = 2 * error_quat.z();
     }
 
     // Calculate jacobian SVD
@@ -1892,21 +1887,17 @@ void ImpedanceController::control_libfranka_sim() {
 
     jacobian_pinv = compute_jacob_pseudoinv(jacobian, lambda);
 
-    for (size_t i = 0; i < 7; i++) {
-      tau_ext[i] = state.tau_ext_hat_filtered[i];
-    }
-
     {
       std::lock_guard<std::mutex> lock(desired_twist_mutex);
       current_twist = jacobian * current_joints_speed;
       error_twist = desired_twist_vec - current_twist;
     }
 
+    h_e = jacobian_pinv.transpose() * extern_tau;
     {
       std::lock_guard<std::mutex> lock(desired_accel_mutex);
       if (compliance_mode.load()) {
 
-        h_e = jacobian_pinv.transpose() * extern_tau;
         y = jacobian_pinv * MD_1 *
             (
                 // The robot should not accept trajectory, so the desired
@@ -1933,7 +1924,7 @@ void ImpedanceController::control_libfranka_sim() {
       }
     }
 
-    control_input = mass_matrix * y + coriolis + tau_ext;
+    control_input = mass_matrix * y + coriolis + extern_tau;
 
     // Clamping control input
     //
