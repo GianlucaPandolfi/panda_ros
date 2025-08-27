@@ -317,6 +317,10 @@ public:
         this->create_publisher<panda_interfaces::msg::BodyLengths>(
             image_constants::body_lengths_topic, sensor_qos);
 
+    wrists_lenght_pub =
+        this->create_publisher<panda_interfaces::msg::DoubleStamped>(
+            "/wrists_length", sensor_qos);
+
     publishing_thread = std::thread{[this]() {
       while (!publish_run) {
         std::this_thread::sleep_for(5ms);
@@ -451,6 +455,8 @@ private:
       skeleton_marker_pub;
   rclcpp::Publisher<panda_interfaces::msg::BodyLengths>::SharedPtr
       body_lengths_pub;
+  rclcpp::Publisher<panda_interfaces::msg::DoubleStamped>::SharedPtr
+      wrists_lenght_pub;
 
   // DEBUG PUBLISHERS
   rclcpp::Publisher<panda_interfaces::msg::DoubleStamped>::SharedPtr
@@ -1212,6 +1218,16 @@ void SkeletonTrackerYolo::publish_body_lengths(
         body_lengths.value.push_back(length);
       }
     }
+  }
+  if (filter_state[9].is_initialized && filter_state[10].is_initialized) {
+
+    geometry_msgs::msg::Point p_start = landmark_3d[9];
+    geometry_msgs::msg::Point p_end = landmark_3d[10];
+
+    panda_interfaces::msg::DoubleStamped dist;
+    dist.header.stamp = this->now();
+    dist.data = skeleton_utils::distance(p_start, p_end);
+    wrists_lenght_pub->publish(dist);
   }
 
   body_lengths_pub->publish(body_lengths);

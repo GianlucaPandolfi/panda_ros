@@ -6,6 +6,7 @@
 #include "panda_utils/constants.hpp"
 #include "rclcpp/rclcpp.hpp"
 #include "rclcpp_action/rclcpp_action.hpp"
+#include "realtime_tools/realtime_tools/realtime_helpers.hpp"
 #include "realtime_tools/realtime_tools/realtime_publisher.hpp"
 #include "std_msgs/msg/bool.hpp"
 #include <Eigen/src/Core/Matrix.h>
@@ -161,6 +162,20 @@ private:
 
   void execute(const std::shared_ptr<GoalHandleCartMove> goal_handle) {
     RCLCPP_INFO(this->get_logger(), "Executing goal");
+
+    if (realtime_tools::has_realtime_kernel()) {
+      if (!realtime_tools::configure_sched_fifo(98)) {
+        RCLCPP_WARN(this->get_logger(),
+                    "Execute thread: Could not set SCHED_FIFO."
+                    " Running with default scheduler.");
+      } else {
+        RCLCPP_INFO(this->get_logger(),
+                    "Execute thread: Set SCHED_FIFO priority.");
+      }
+    } else {
+      RCLCPP_WARN(this->get_logger(),
+                  "Execute thread: No real-time kernel detected.");
+    }
     rclcpp::Rate loop_rate(loop_rate_freq, this->get_clock());
 
     RCLCPP_DEBUG(this->get_logger(), "Getting goal");
@@ -208,7 +223,7 @@ private:
         result->completed = false;
         goal_handle->canceled(result);
         RCLCPP_INFO(this->get_logger(), "Goal canceled");
-        return; 
+        return;
       }
       t = this->get_clock()->now() - t0;
       RCLCPP_DEBUG(this->get_logger(), "Time now %f", t.seconds());
@@ -317,6 +332,17 @@ private:
 int main(int argc, char **argv) {
   rclcpp::init(argc, argv);
   auto node = std::make_shared<CartTrajectory>();
+
+  if (!realtime_tools::has_realtime_kernel()) {
+    RCLCPP_ERROR(node->get_logger(), "No real time kernel");
+  }
+  if (!realtime_tools::configure_sched_fifo(98)) {
+    RCLCPP_ERROR(node->get_logger(),
+                 "Couldn't configure real time priority for current node");
+  } else {
+    RCLCPP_INFO(node->get_logger(), "Set real time priority");
+  }
+
   rclcpp::spin(node);
   rclcpp::shutdown();
   return 0;

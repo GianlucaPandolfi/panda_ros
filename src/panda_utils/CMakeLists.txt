@@ -22,6 +22,7 @@ find_package(ament_index_cpp REQUIRED)
 find_package(rclcpp_lifecycle REQUIRED)
 find_package(realtime_tools REQUIRED)
 find_package(image_processing REQUIRED)
+find_package(tf2_geometry_msgs REQUIRED)
 
 include_directories(
   include
@@ -83,13 +84,13 @@ add_executable(joint_traj ./src/joint_traj.cpp)
 ament_target_dependencies(joint_traj rclcpp panda_interfaces std_msgs tf2_eigen tf2 tf2_msgs sensor_msgs realtime_tools)
 
 add_executable(cart_traj ./src/cart_traj.cpp)
-ament_target_dependencies(cart_traj rclcpp panda_interfaces std_msgs tf2_eigen tf2 tf2_msgs sensor_msgs)
+ament_target_dependencies(cart_traj rclcpp panda_interfaces std_msgs tf2_eigen tf2 tf2_msgs sensor_msgs realtime_tools)
 
 add_executable(loop_cart_traj ./src/loop_cart_traj.cpp)
-ament_target_dependencies(loop_cart_traj rclcpp panda_interfaces std_msgs tf2_eigen tf2 tf2_msgs sensor_msgs)
+ament_target_dependencies(loop_cart_traj rclcpp panda_interfaces std_msgs tf2_eigen tf2 tf2_msgs sensor_msgs realtime_tools)
 
 add_executable(stop_traj ./src/exponential_cart_traj.cpp)
-ament_target_dependencies(stop_traj rclcpp panda_interfaces std_msgs tf2_eigen tf2 tf2_msgs sensor_msgs)
+ament_target_dependencies(stop_traj rclcpp panda_interfaces std_msgs tf2_eigen tf2 tf2_msgs sensor_msgs realtime_tools)
 
 add_executable(clik_cmd_pub ./src/clik_cmd_publisher.cpp)
 ament_target_dependencies(clik_cmd_pub rclcpp panda_interfaces std_msgs tf2_eigen tf2 tf2_msgs sensor_msgs rclcpp_lifecycle ament_index_cpp)
@@ -118,8 +119,12 @@ add_executable(joint_traj_example ./examples/joint_traj_example.cpp)
 ament_target_dependencies(joint_traj_example rclcpp panda_interfaces std_msgs tf2_eigen tf2 tf2_msgs sensor_msgs pinocchio ament_index_cpp rclcpp_lifecycle)
 
 add_executable(impedance_controller ./src/impedance_controller.cpp)
-ament_target_dependencies(impedance_controller rclcpp panda_interfaces std_msgs tf2_eigen tf2 tf2_msgs sensor_msgs pinocchio ament_index_cpp rclcpp_lifecycle realtime_tools)
+ament_target_dependencies(impedance_controller rclcpp panda_interfaces std_msgs tf2_eigen tf2 tf2_msgs sensor_msgs pinocchio ament_index_cpp rclcpp_lifecycle realtime_tools tf2_geometry_msgs)
 target_link_libraries(impedance_controller robot_model franka debug_publisher)
+
+add_executable(publish_franks_tfs ./examples/hand_estimation.cpp)
+ament_target_dependencies(publish_franks_tfs rclcpp panda_interfaces std_msgs tf2_eigen tf2 tf2_msgs sensor_msgs rclcpp_lifecycle tf2_geometry_msgs ament_index_cpp)
+target_link_libraries(publish_franks_tfs franka)
 
 add_executable(joint_traj_test ./examples/joint_trajectory_test.cpp)
 ament_target_dependencies(joint_traj_test rclcpp panda_interfaces std_msgs tf2_eigen tf2 tf2_msgs sensor_msgs pinocchio ament_index_cpp rclcpp_lifecycle)
@@ -142,6 +147,7 @@ install(TARGETS
   joint_traj_example
   impedance_controller
   joint_traj_test
+  publish_franks_tfs
   DESTINATION lib/${PROJECT_NAME}
 )
 

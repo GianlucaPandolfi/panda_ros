@@ -5,6 +5,7 @@
 #include "panda_utils/constants.hpp"
 #include "rclcpp/rclcpp.hpp"
 #include "rclcpp_action/rclcpp_action.hpp"
+#include "realtime_tools/realtime_tools/realtime_helpers.hpp"
 #include "realtime_tools/realtime_tools/realtime_publisher.hpp"
 #include <Eigen/src/Core/Matrix.h>
 #include <Eigen/src/Geometry/AngleAxis.h>
@@ -31,8 +32,8 @@ using namespace std::chrono_literals;
 struct decay_laws {
   double lambda, mu, a, b, t_f;
   double q_i_dot, q_i_ddot;
-  decay_laws(double t_f, double q_i_dot, double q_i_ddot, double lambda = 10,
-             double mu = 20)
+  decay_laws(double t_f, double q_i_dot, double q_i_ddot, double lambda = 5,
+             double mu = 10)
       : lambda(lambda), mu(mu), t_f(t_f), q_i_dot(q_i_dot), q_i_ddot(q_i_ddot) {
     b = (-lambda * q_i_dot - q_i_ddot) / (mu - lambda);
     a = q_i_dot - b;
@@ -189,6 +190,20 @@ private:
 
   void execute(const std::shared_ptr<GoalHandleStopTraj> goal_handle) {
     RCLCPP_INFO(this->get_logger(), "Executing goal");
+
+    if (realtime_tools::has_realtime_kernel()) {
+      if (!realtime_tools::configure_sched_fifo(98)) {
+        RCLCPP_WARN(this->get_logger(),
+                    "Execute thread: Could not set SCHED_FIFO."
+                    " Running with default scheduler.");
+      } else {
+        RCLCPP_INFO(this->get_logger(),
+                    "Execute thread: Set SCHED_FIFO priority.");
+      }
+    } else {
+      RCLCPP_WARN(this->get_logger(),
+                  "Execute thread: No real-time kernel detected.");
+    }
     rclcpp::Rate loop_rate(loop_rate_freq, this->get_clock());
 
     RCLCPP_DEBUG(this->get_logger(), "Getting goal");
@@ -324,6 +339,16 @@ private:
 int main(int argc, char **argv) {
   rclcpp::init(argc, argv);
   auto node = std::make_shared<StopTrajectory>();
+
+  if (!realtime_tools::has_realtime_kernel()) {
+    RCLCPP_ERROR(node->get_logger(), "No real time kernel");
+  }
+  if (!realtime_tools::configure_sched_fifo(98)) {
+    RCLCPP_ERROR(node->get_logger(),
+                 "Couldn't configure real time priority for current node");
+  } else {
+    RCLCPP_INFO(node->get_logger(), "Set real time priority");
+  }
   rclcpp::spin(node);
   rclcpp::shutdown();
   return 0;

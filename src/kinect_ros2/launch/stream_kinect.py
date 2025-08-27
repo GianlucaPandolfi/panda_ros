@@ -1,12 +1,23 @@
 from launch_ros.actions import Node
 from launch import LaunchDescription
 from launch_ros.actions import ComposableNodeContainer
+from launch.actions import DeclareLaunchArgument
 from launch_ros.descriptions import ComposableNode
 
 
 def generate_launch_description():
     return LaunchDescription(
         [
+            DeclareLaunchArgument(
+                'world_to_kinect_depth',
+                default_value='[0.0, 0.0, 2.1, -1.57, 0.0, -1.57, world, kinect_depth]',
+                description='Base to world transform'
+            ),
+            DeclareLaunchArgument(
+                'depth_to_rgb',
+                default_value='[-0.0254, -0.00013, -0.00218,-1.57, 0.0, -1.57, world, kinect_depth]',
+                description='Base to world transform'
+            ),
             Node(
                 package="kinect_ros2",
                 executable="kinect_ros2_node",

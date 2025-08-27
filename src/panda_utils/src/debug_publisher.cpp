@@ -46,6 +46,16 @@ void DebugPublisher::create_pubs(
           "debug/cmd/y_cartesian_contribute",
           panda_interface_names::DEFAULT_TOPIC_QOS);
 
+  tau_external_contribute_debug =
+      node->create_publisher<panda_interfaces::msg::DoubleArrayStamped>(
+          "debug/cmd/tau_ext_contribute",
+          panda_interface_names::DEFAULT_TOPIC_QOS);
+
+  external_forces_contribute_debug =
+      node->create_publisher<panda_interfaces::msg::DoubleArrayStamped>(
+          "debug/cmd/external_forces_contribute",
+          panda_interface_names::DEFAULT_TOPIC_QOS);
+
   lamda_dls_debug =
       node->create_publisher<panda_interfaces::msg::DoubleStamped>(
           "debug/lambda", panda_interface_names::DEFAULT_TOPIC_QOS);
@@ -173,6 +183,20 @@ void DebugPublisher::publish(rclcpp::Time now) {
       y_cartesian_stamped.data[i] = pub_data.y_cartesian.value()[i];
     }
     y_cartesian_contribute_debug->publish(y_cartesian_stamped);
+  }
+
+  if (pub_data.h_e.has_value()) {
+    for (size_t i = 0; i < 6; i++) {
+      y_cartesian_stamped.data[i] = pub_data.h_e.value()[i];
+    }
+    external_forces_contribute_debug->publish(y_cartesian_stamped);
+  }
+
+  if (pub_data.tau_ext.has_value()) {
+    for (size_t i = 0; i < 7; i++) {
+      arr_stamped.data[i] = pub_data.tau_ext.value()[i];
+    }
+    tau_external_contribute_debug->publish(arr_stamped);
   }
 
   if (pub_data.des_pose.has_value()) {

@@ -8,6 +8,7 @@
 #include "panda_interfaces/action/stop_traj.hpp"
 #include "panda_interfaces/msg/human_detected.hpp"
 #include "panda_interfaces/srv/set_compliance_mode.hpp"
+#include "panda_interfaces/srv/wrist_contact.hpp"
 #include "panda_utils/constants.hpp"
 #include "panda_utils/utils_func.hpp"
 #include "sensor_msgs/msg/joint_state.hpp"
@@ -25,6 +26,7 @@
 #include <panda_interfaces/msg/human_detected.hpp>
 #include <rclcpp/client.hpp>
 #include <rclcpp/duration.hpp>
+#include <rclcpp/executors.hpp>
 #include <rclcpp/future_return_code.hpp>
 #include <rclcpp/logging.hpp>
 #include <rclcpp/parameter.hpp>
@@ -35,6 +37,7 @@
 #include <rclcpp/wait_for_message.hpp>
 #include <rclcpp_action/client.hpp>
 #include <rclcpp_action/create_client.hpp>
+#include <rclcpp_action/exceptions.hpp>
 #include <rclcpp_action/rclcpp_action.hpp>
 #include <shared_mutex>
 #include <string>
@@ -123,7 +126,7 @@ struct human_presence {
   std::shared_mutex mut;
   bool human_present = false;
   rclcpp::Duration time_present = rclcpp::Duration::from_seconds(0.0);
-  std::optional<std::string> contact_joint = std::optional<std::string>{};
+  std::optional<std::string> contact_wrist{std::nullopt};
 
   void normalize_time() {
     if (time_present.seconds() > MAX_TIME) {
@@ -194,8 +197,10 @@ const std::string robot_base_frame_name{"fr3_link0"};
 const std::string robot_end_affector_frame{"fr3_joint7"};
 const std::string world_frame{"world"};
 const rclcpp::Duration max_tf_age = rclcpp::Duration::from_seconds(1.0 / 30.0);
+const rclcpp::Duration max_wrist_tfs_age =
+    rclcpp::Duration::from_seconds(1.0 / 5.0);
 const double robot_radius_area = 1.0;       // meters
-const double min_distance_from_joint = 0.1; // meters
+const double min_distance_from_joint = 1.0; // meters
 
 int main(int argc, char **argv) {
   rclcpp::init(argc, argv);
@@ -309,6 +314,12 @@ int main(int argc, char **argv) {
               panda_interface_names::set_compliance_mode_service_name);
   panda_interfaces::srv::SetComplianceMode_Request compliance_request;
 
+  // Contact joint service
+  rclcpp::Client<panda_interfaces::srv::WristContact>::SharedPtr
+      wrist_contact_index_client =
+          main_node->create_client<panda_interfaces::srv::WristContact>(
+              panda_interface_names::set_wrist_contact_service_name);
+
   // Publisher for the update of desired commands when switching to compliance
   // mode
 
@@ -371,28 +382,47 @@ int main(int argc, char **argv) {
       rclcpp_action::create_client<StopTraj>(
           main_node, panda_interface_names::panda_exponential_stop_action_name);
 
+  rclcpp::Node::SharedPtr confirmation_node =
+      std::make_shared<rclcpp::Node>("actions_confirmation_node");
+
   // Management of action nodes for the 2 types of trajectories
   auto cancel_actions = [&cartesian_traj_handle, &loop_cartesian_traj_handle,
                          &stop_traj_handle, &stop_traj_action_client,
                          &cart_traj_action_client, &loop_traj_action_client,
                          &main_node]() {
     if (cartesian_traj_handle.has_value()) {
-      cart_traj_action_client->async_cancel_goal(cartesian_traj_handle.value());
-      RCLCPP_INFO(main_node->get_logger(),
-                  "Requested cancel of cartesian trajectory action");
+      try {
+        cart_traj_action_client->async_cancel_goal(
+            cartesian_traj_handle.value());
+        RCLCPP_INFO(main_node->get_logger(),
+                    "Requested cancel of cartesian trajectory action");
+      } catch (const rclcpp_action::exceptions::UnknownGoalHandleError &ex) {
+        RCLCPP_WARN_STREAM(main_node->get_logger(),
+                           "Goal handle has null value or terminated");
+      }
     }
 
     if (loop_cartesian_traj_handle.has_value()) {
-      loop_traj_action_client->async_cancel_goal(
-          loop_cartesian_traj_handle.value());
-      RCLCPP_INFO(main_node->get_logger(),
-                  "Requested cancel of loop cartesian trajectory action");
+      try {
+        loop_traj_action_client->async_cancel_goal(
+            loop_cartesian_traj_handle.value());
+        RCLCPP_INFO(main_node->get_logger(),
+                    "Requested cancel of loop cartesian trajectory action");
+      } catch (const rclcpp_action::exceptions::UnknownGoalHandleError &ex) {
+        RCLCPP_WARN_STREAM(main_node->get_logger(),
+                           "Goal handle has null value or terminated");
+      }
     }
 
     if (stop_traj_handle.has_value()) {
-      stop_traj_action_client->async_cancel_goal(stop_traj_handle.value());
-      RCLCPP_INFO(main_node->get_logger(),
-                  "Requested cancel of exponential stop action");
+      try {
+        stop_traj_action_client->async_cancel_goal(stop_traj_handle.value());
+        RCLCPP_INFO(main_node->get_logger(),
+                    "Requested cancel of exponential stop action");
+      } catch (const rclcpp_action::exceptions::UnknownGoalHandleError &ex) {
+        RCLCPP_WARN_STREAM(main_node->get_logger(),
+                           "Goal handle has null value or terminated");
+      }
     }
   };
 
@@ -404,20 +434,6 @@ int main(int argc, char **argv) {
           cartesian_traj_handle = std::nullopt;
         };
     cart_traj_options.result_callback = cart_result_callback;
-
-    auto cart_goal_response_callback =
-        [&cartesian_traj_handle](
-            rclcpp_action::ClientGoalHandle<CartTraj>::SharedPtr goal_handle) {
-          cartesian_traj_handle = goal_handle;
-        };
-    cart_traj_options.goal_response_callback = cart_goal_response_callback;
-
-    auto loop_cart_goal_response_callback =
-        [&loop_cartesian_traj_handle](
-            rclcpp_action::ClientGoalHandle<LoopCartTraj>::SharedPtr
-                goal_handle) { loop_cartesian_traj_handle = goal_handle; };
-    loop_cart_traj_options.goal_response_callback =
-        loop_cart_goal_response_callback;
 
     auto loop_result_callback =
         [&loop_cartesian_traj_handle](
@@ -432,12 +448,28 @@ int main(int argc, char **argv) {
         };
     stop_traj_options.result_callback = stop_result_callback;
 
-    auto stop_goal_response_callback =
-        [&stop_traj_handle](
-            rclcpp_action::ClientGoalHandle<StopTraj>::SharedPtr goal_handle) {
-          stop_traj_handle = goal_handle;
-        };
-    stop_traj_options.goal_response_callback = stop_goal_response_callback;
+    // auto cart_goal_response_callback =
+    //     [&cartesian_traj_handle](
+    //         rclcpp_action::ClientGoalHandle<CartTraj>::SharedPtr goal_handle)
+    //         {
+    //       cartesian_traj_handle = goal_handle;
+    //     };
+    // cart_traj_options.goal_response_callback = cart_goal_response_callback;
+
+    // auto loop_cart_goal_response_callback =
+    //     [&loop_cartesian_traj_handle](
+    //         rclcpp_action::ClientGoalHandle<LoopCartTraj>::SharedPtr
+    //             goal_handle) { loop_cartesian_traj_handle = goal_handle; };
+    // loop_cart_traj_options.goal_response_callback =
+    //     loop_cart_goal_response_callback;
+
+    // auto stop_goal_response_callback =
+    //     [&stop_traj_handle](
+    //         rclcpp_action::ClientGoalHandle<StopTraj>::SharedPtr goal_handle)
+    //         {
+    //       stop_traj_handle = goal_handle;
+    //     };
+    // stop_traj_options.goal_response_callback = stop_goal_response_callback;
   }
 
   RCLCPP_INFO(main_node->get_logger(), "Waiting for servers...");
@@ -465,28 +497,70 @@ int main(int argc, char **argv) {
   std::thread info_thread([&executor]() { executor.spin(); });
 
   std::thread safe_keeper_thread{[cancel_actions, &main_node, &presence_state,
-                                  &state, &threads_run]() {
+                                  &state, &threads_run,
+                                  &wrist_contact_index_client]() {
     while (!threads_run.load()) {
       std::this_thread::sleep_for(1s);
     }
 
     RCLCPP_INFO_STREAM(main_node->get_logger(), "Started thread 'safe_keeper'");
 
+    bool wrist_in_contact = false;
+    panda_interfaces::srv::WristContact_Request::SharedPtr
+        wrist_contact_request =
+            std::make_shared<panda_interfaces::srv::WristContact_Request>();
+    auto send_req_wrist_contact =
+        [&wrist_contact_index_client, &main_node](
+            panda_interfaces::srv::WristContact_Request::SharedPtr req) {
+          auto future = wrist_contact_index_client->async_send_request(req);
+          bool stopped = false;
+          while (!stopped) {
+            auto res = future.wait_for(10ms);
+            if (res == std::future_status::ready) {
+              stopped = true;
+            } else {
+              rclcpp::sleep_for(1ms);
+            }
+          }
+        };
+
     while (threads_run.load()) {
-      std::shared_lock<std::shared_mutex> mutex(presence_state.mut);
-      if (presence_state.human_present &&
-          state != SceneState::transition_human &&
-          state != SceneState::compliance) {
-        RCLCPP_INFO_STREAM(
-            main_node->get_logger(),
-            "Human present in scene, cancelling actions and transitioning");
-        cancel_actions();
-        state = SceneState::transition_human;
-      } else if (!presence_state.human_present &&
-                 state == SceneState::compliance) {
-        RCLCPP_INFO_STREAM(main_node->get_logger(),
-                           "Human left scene, transitioning");
-        state = SceneState::transition_leave_human;
+      {
+        std::shared_lock<std::shared_mutex> mutex(presence_state.mut);
+        if (!wrist_in_contact && presence_state.contact_wrist.has_value()) {
+          // Send request to alert the contact
+          RCLCPP_INFO(main_node->get_logger(), "Wrist contact alerted");
+          wrist_contact_request->contact = true;
+          wrist_contact_request->wrist.data =
+              presence_state.contact_wrist.value();
+          send_req_wrist_contact(wrist_contact_request);
+
+          wrist_in_contact = true;
+        } else if (wrist_in_contact &&
+                   !presence_state.contact_wrist.has_value()) {
+          // Send request to alert the loss of contact
+          RCLCPP_INFO(main_node->get_logger(), "Wrist uncontact alerted");
+          wrist_contact_request->contact = false;
+          wrist_contact_request->wrist.data = "";
+          send_req_wrist_contact(wrist_contact_request);
+
+          wrist_in_contact = false;
+        }
+
+        if (presence_state.human_present &&
+            state != SceneState::transition_human &&
+            state != SceneState::compliance) {
+          RCLCPP_INFO_STREAM(
+              main_node->get_logger(),
+              "Human present in scene, cancelling actions and transitioning");
+          cancel_actions();
+          state = SceneState::transition_human;
+        } else if (!presence_state.human_present &&
+                   state == SceneState::compliance) {
+          RCLCPP_INFO_STREAM(main_node->get_logger(),
+                             "Human left scene, transitioning");
+          state = SceneState::transition_leave_human;
+        }
       }
 
       std::this_thread::sleep_for(5ms);
@@ -524,8 +598,9 @@ int main(int argc, char **argv) {
         auto now = sub_node->now();
         // Clear the map to avoid getting false data
         robot_links_body_keypoints_tfs.clear();
-        // Cycle through all the body keypoints frame: get the transform if the
-        // body frame is relatively new in the tf2 system and obvoiusly exists
+        // Cycle through all the body keypoints frame: get the transform if
+        // the body frame is relatively new in the tf2 system and obvoiusly
+        // exists
         for (auto keypoint_frame_name : image_constants::coco_keypoints) {
           try {
             auto keypoint_frame = tf_buffer->lookupTransform(
@@ -611,43 +686,79 @@ int main(int argc, char **argv) {
         // throw the exception if doesn't still exist and continue
         if (presence_state.human_present) {
 
-          std::optional<std::string> joint_touched;
+          std::vector<double> left_wrist_distances;
+          std::vector<double> right_wrist_distances;
 
-          for (auto joint_name : panda_interface_names::panda_joint_names) {
+          // Calculate distances for left wrist to all links
+          for (auto robot_link_name : panda_interface_names::panda_link_names) {
             try {
-              auto tf = tf_buffer->lookupTransform(
-                  image_constants::left_wrist, joint_name, tf2::TimePointZero);
-              if (now - tf.header.stamp <= max_tf_age) {
-                if (geom_utils::distance(tf) <= min_distance_from_joint) {
-                  joint_touched = joint_name;
-                  break;
-                }
+              auto tf = tf_buffer->lookupTransform(image_constants::left_wrist,
+                                                   robot_link_name,
+                                                   tf2::TimePointZero);
+              if (now - tf.header.stamp <= max_wrist_tfs_age) {
+                left_wrist_distances.push_back(geom_utils::distance(tf));
               }
-
             } catch (const tf2::TransformException &ex) {
-              // Tf does not exists
-            }
-
-            try {
-              auto tf = tf_buffer->lookupTransform(
-                  image_constants::right_wrist, joint_name, tf2::TimePointZero);
-              if (now - tf.header.stamp <= max_tf_age) {
-                if (geom_utils::distance(tf) <= min_distance_from_joint) {
-                  joint_touched = joint_name;
-                  break;
-                }
-              }
-
-            } catch (const tf2::TransformException &ex) {
-              // Tf does not exists
+              // Tf does not exist or is too old, skip for this link
             }
           }
 
-          // Finally, if the joint_touched contains any value we update the
-          // contact joint var
-          if (joint_touched.has_value()) {
+          // Calculate distances for right wrist to all links
+          for (auto robot_link_name : panda_interface_names::panda_link_names) {
+            try {
+              auto tf = tf_buffer->lookupTransform(image_constants::right_wrist,
+                                                   robot_link_name,
+                                                   tf2::TimePointZero);
+              if (now - tf.header.stamp <= max_wrist_tfs_age) {
+                right_wrist_distances.push_back(geom_utils::distance(tf));
+              }
+            } catch (const tf2::TransformException &ex) {
+              // Tf does not exist or is too old, skip for this link
+            }
+          }
+
+          std::optional<double> mean_dist_left;
+          std::optional<double> min_dist_left = 100;
+          if (!left_wrist_distances.empty()) {
+            double sum = 0.0;
+            for (double d : left_wrist_distances) {
+              if (d < min_dist_left) {
+                min_dist_left = d;
+              }
+              sum += d;
+            }
+            mean_dist_left = sum / left_wrist_distances.size();
+          }
+
+          std::optional<double> mean_dist_right;
+          std::optional<double> min_dist_right = 100;
+          if (!right_wrist_distances.empty()) {
+            double sum = 0.0;
+            for (double d : right_wrist_distances) {
+              if (d < min_dist_right) {
+                min_dist_right = d;
+              }
+              sum += d;
+            }
+            mean_dist_right = sum / right_wrist_distances.size();
+          }
+
+          std::optional<std::string> active_wrist_frame{std::nullopt};
+
+          if (mean_dist_left.has_value() &&
+              (!mean_dist_right.has_value() ||
+               mean_dist_left.value() < mean_dist_right.value()) &&
+              min_dist_left.value() <= min_distance_from_joint) {
+            active_wrist_frame = image_constants::left_wrist;
+          } else if (mean_dist_right.has_value() &&
+                     min_dist_right.value() <= min_distance_from_joint) {
+            active_wrist_frame = image_constants::right_wrist;
+          }
+
+          // We update the contact joint var
+          {
             std::shared_lock<std::shared_mutex> mutex(presence_state.mut);
-            presence_state.contact_joint = joint_touched;
+            presence_state.contact_wrist = active_wrist_frame;
           }
         }
       }
@@ -675,13 +786,16 @@ int main(int argc, char **argv) {
   // Resetting compliance mode if set in controller
   // Firstly, update the desired pose and other commands to the read one
   send_current_pose_as_cmd(pose_state.pose);
+  // Sleep to avoid that the robot passes in non compliance mode before updating
+  // his desired state
+  std::this_thread::sleep_for(500ms);
 
   compliance_request.cmd = false;
   auto compliance_future = compliance_mode_client->async_send_request(
       std::make_shared<panda_interfaces::srv::SetComplianceMode_Request>(
           compliance_request));
   bool stopped = false;
-  while (!stopped) {
+  while (!stopped && rclcpp::ok()) {
     auto res = compliance_future.wait_for(10ms);
     if (res == std::future_status::ready) {
       RCLCPP_INFO(main_node->get_logger(), "Robot in non compliance mode");
@@ -710,14 +824,36 @@ int main(int argc, char **argv) {
         }
 
         RCLCPP_INFO(main_node->get_logger(), "Sending robot home pose");
-        cart_traj_action_client->async_send_goal(home_goal, cart_traj_options);
-        while (!cartesian_traj_handle.has_value()) {
-          RCLCPP_INFO(main_node->get_logger(), "Waiting for goal confirmation");
-          if (!rclcpp::ok()) {
+        RCLCPP_INFO(main_node->get_logger(), "Waiting for goal confirmation");
+        auto future = cart_traj_action_client->async_send_goal(
+            home_goal, cart_traj_options);
+        auto fut_return =
+            rclcpp::spin_until_future_complete(confirmation_node, future, 3s);
+        switch (fut_return) {
+        case rclcpp::FutureReturnCode::SUCCESS: {
+          auto handle = future.get();
+          if (handle) {
+            cartesian_traj_handle = handle;
+            RCLCPP_INFO(main_node->get_logger(),
+                        "Cartesian trajectory accepted");
+          } else {
+            RCLCPP_INFO(main_node->get_logger(),
+                        "Cartesian trajectory refused");
             break;
           }
-          rclcpp::sleep_for(2s);
+          break;
         }
+        case rclcpp::FutureReturnCode::INTERRUPTED: {
+          RCLCPP_ERROR(main_node->get_logger(),
+                       "Cartesian trajectory interrupted");
+          break;
+        }
+        case rclcpp::FutureReturnCode::TIMEOUT: {
+          RCLCPP_ERROR(main_node->get_logger(),
+                       "Cartesian trajectory went timeout");
+          break;
+        } break;
+        };
 
         while (cartesian_traj_handle.has_value()) {
           RCLCPP_INFO(main_node->get_logger(),
@@ -745,17 +881,37 @@ int main(int argc, char **argv) {
       update_state();
 
       if (!loop_cartesian_traj_handle.has_value()) {
-        loop_traj_action_client->async_send_goal(triangle_task_goal,
-                                                 loop_cart_traj_options);
-        while (!loop_cartesian_traj_handle.has_value()) {
-          RCLCPP_INFO(main_node->get_logger(),
-                      "Waiting for loop goal confirmation");
-          if (!rclcpp::ok()) {
+        auto future = loop_traj_action_client->async_send_goal(
+            triangle_task_goal, loop_cart_traj_options);
+        auto fut_return =
+            rclcpp::spin_until_future_complete(confirmation_node, future, 3s);
+        switch (fut_return) {
+        case rclcpp::FutureReturnCode::SUCCESS: {
+          auto handle = future.get();
+          if (handle) {
+            loop_cartesian_traj_handle = handle;
+            RCLCPP_INFO(main_node->get_logger(),
+                        "Loop cartesian trajectory accepted");
+          } else {
+            RCLCPP_INFO(main_node->get_logger(),
+                        "Loop cartesian trajectory refused");
             break;
           }
-          rclcpp::sleep_for(2s);
+          break;
         }
+        case rclcpp::FutureReturnCode::INTERRUPTED: {
+          RCLCPP_ERROR(main_node->get_logger(),
+                       "Loop cartesian trajectory interrupted");
+          break;
+        }
+        case rclcpp::FutureReturnCode::TIMEOUT: {
+          RCLCPP_ERROR(main_node->get_logger(),
+                       "Loop cartesian trajectory went timeout");
+          break;
+        } break;
+        };
       }
+
       if ((main_node->now() - start).seconds() > 2.0) {
         RCLCPP_INFO(main_node->get_logger(), "In task state");
         if (loop_cartesian_traj_handle.has_value()) {
@@ -783,15 +939,31 @@ int main(int argc, char **argv) {
 
       RCLCPP_INFO(main_node->get_logger(),
                   "Sending velocity and acceleration to 0 exponentially");
-      stop_traj_action_client->async_send_goal(stop_traj_goal,
-                                               stop_traj_options);
-      while (!stop_traj_handle.has_value()) {
-        RCLCPP_INFO(main_node->get_logger(), "Waiting for goal confirmation");
-        if (!rclcpp::ok()) {
+      auto future = stop_traj_action_client->async_send_goal(stop_traj_goal,
+                                                             stop_traj_options);
+      auto fut_return =
+          rclcpp::spin_until_future_complete(confirmation_node, future, 3s);
+      switch (fut_return) {
+      case rclcpp::FutureReturnCode::SUCCESS: {
+        auto handle = future.get();
+        if (handle) {
+          stop_traj_handle = handle;
+          RCLCPP_INFO(main_node->get_logger(), "Stop trajectory accepted");
+        } else {
+          RCLCPP_INFO(main_node->get_logger(), "Stop trajectory refused");
           break;
         }
-        rclcpp::sleep_for(2s);
+        break;
       }
+      case rclcpp::FutureReturnCode::INTERRUPTED: {
+        RCLCPP_ERROR(main_node->get_logger(), "Stop trajectory interrupted");
+        break;
+      }
+      case rclcpp::FutureReturnCode::TIMEOUT: {
+        RCLCPP_ERROR(main_node->get_logger(), "Stop trajectory went timeout");
+        break;
+      } break;
+      };
 
       while (stop_traj_handle.has_value()) {
         RCLCPP_INFO(main_node->get_logger(),
@@ -862,14 +1034,34 @@ int main(int argc, char **argv) {
       }
 
       RCLCPP_INFO(main_node->get_logger(), "Sending robot home pose");
-      cart_traj_action_client->async_send_goal(home_goal, cart_traj_options);
-      while (!cartesian_traj_handle.has_value()) {
-        RCLCPP_INFO(main_node->get_logger(), "Waiting for goal confirmation");
-        if (!rclcpp::ok()) {
+      RCLCPP_INFO(main_node->get_logger(), "Waiting for goal confirmation");
+      auto future = cart_traj_action_client->async_send_goal(home_goal,
+                                                             cart_traj_options);
+      auto fut_return =
+          rclcpp::spin_until_future_complete(confirmation_node, future, 3s);
+      switch (fut_return) {
+      case rclcpp::FutureReturnCode::SUCCESS: {
+        auto handle = future.get();
+        if (handle) {
+          cartesian_traj_handle = handle;
+          RCLCPP_INFO(main_node->get_logger(), "Cartesian trajectory accepted");
+        } else {
+          RCLCPP_INFO(main_node->get_logger(), "Cartesian trajectory refused");
           break;
         }
-        rclcpp::sleep_for(2s);
+        break;
       }
+      case rclcpp::FutureReturnCode::INTERRUPTED: {
+        RCLCPP_ERROR(main_node->get_logger(),
+                     "Cartesian trajectory interrupted");
+        break;
+      }
+      case rclcpp::FutureReturnCode::TIMEOUT: {
+        RCLCPP_ERROR(main_node->get_logger(),
+                     "Cartesian trajectory went timeout");
+        break;
+      } break;
+      };
 
       while (cartesian_traj_handle.has_value()) {
         RCLCPP_INFO(main_node->get_logger(),

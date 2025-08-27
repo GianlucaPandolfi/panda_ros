@@ -37,7 +37,7 @@ rosidl_generate_interfaces(${PROJECT_NAME}
   "./msg/FloatStringPair.msg"
   "./msg/BodyLengths.msg"
   "./action/StopTraj.action"
-  "./srv/JointContact.srv"
+  "./srv/WristContact.srv"
   DEPENDENCIES tf2_msgs geometry_msgs std_msgs
 )
 

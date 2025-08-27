@@ -93,6 +93,12 @@ def generate_launch_description():
         description='fr3 robot ip'
     )
 
+    world_base_link = DeclareLaunchArgument(
+        'world_base_link',
+        default_value='[0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0]',
+        description='Base to world transform'
+    )
+
     alpha = DeclareLaunchArgument(
         'alpha',
         default_value='30.0',
@@ -192,8 +198,18 @@ def generate_launch_description():
             'control_freq': LaunchConfiguration('controller_rate'),
             'clamp': LaunchConfiguration('clamp_effort_control'),
             'use_robot': LaunchConfiguration('use_robot'),
-            'robot_ip': LaunchConfiguration('robot_ip')
-
+            'robot_ip': LaunchConfiguration('robot_ip'),
+            'world_base_link': LaunchConfiguration('world_base_link')
+        }],
+    )
+    publish_franks_tfs = Node(
+        package='panda_utils',
+        executable='publish_franks_tfs',
+        name='publish_franks_tfs',
+        parameters=[{
+            'use_sim_time': LaunchConfiguration('use_sim_time'),
+            'robot_ip': LaunchConfiguration('robot_ip'),
+            'world_base_link': LaunchConfiguration('world_base_link')
         }],
     )
 
@@ -215,6 +231,7 @@ def generate_launch_description():
         clik_gamma,
         alpha,
         task_gain,
+        world_base_link,
         effort_cmd_server,
         joint_traj_server,
         cart_traj_server,
@@ -223,6 +240,7 @@ def generate_launch_description():
         clik_cmd_pub,
         inverse_dynamics_controller,
         impedance_controller,
+        publish_franks_tfs
         # pos_cmds_joints,
         # pd_grav_controller,
         # controller_manager

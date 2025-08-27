@@ -13,6 +13,15 @@
 
 using namespace std::chrono_literals;
 
+const double w_c = 50.0;
+const double ts = 1 / 1000.0;
+
+const double alpha = w_c * ts / (1 + w_c * ts);
+
+double filter(double state, double value) {
+  return alpha * value + (1.0 - alpha) * state;
+}
+
 class TorqueSensorsPublisher : public rclcpp::Node {
 public:
   TorqueSensorsPublisher() : Node("torque_sensors_publisher") {
@@ -35,6 +44,10 @@ public:
               sensor_topic_names[i], 10, wrench_sub_cb);
     }
 
+    for (size_t i = 0; i < torque_stamped.measures.torque.size(); i++) {
+      torque_stamped.measures.torque[i] = 0.0;
+    }
+
     auto joints_effort_cb =
         [this](const panda_interfaces::msg::JointsEffort msg) {
           joints_effort = msg;
@@ -45,10 +58,10 @@ public:
             panda_effort_cmd_topic_name, 10, joints_effort_cb);
 
     auto wrench_array_pub_cb = [this]() {
-      panda_interfaces::msg::JointTorqueMeasureStamped torque_stamped;
       for (size_t i = 0; i < torque_stamped.measures.torque.size(); i++) {
-        torque_stamped.measures.torque[i] =
-            wrenches[i].wrench.torque.z - joints_effort.effort_values[i];
+        torque_stamped.measures.torque[i] = filter(
+            torque_stamped.measures.torque[i],
+            wrenches[i].wrench.torque.z - joints_effort.effort_values[i]);
       }
       torque_stamped.header.stamp = this->get_clock()->now();
       this->torque_measures_pub->publish(torque_stamped);
@@ -73,6 +86,7 @@ private:
 
   std::vector<geometry_msgs::msg::WrenchStamped> wrenches;
   panda_interfaces::msg::JointsEffort joints_effort;
+  panda_interfaces::msg::JointTorqueMeasureStamped torque_stamped;
   rclcpp::TimerBase::SharedPtr timer;
 
   const std::vector<std::string> sensor_topic_names = {

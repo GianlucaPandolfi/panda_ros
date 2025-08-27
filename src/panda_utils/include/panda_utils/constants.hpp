@@ -29,7 +29,7 @@ const std::string loop_cart_traj_node_name{"loop_cart_traj_server"};
 /////////////////////////////////////////////////////////////
 const std::string joints_cmd_pos_service_name{"send_joints_pos_cmd"};
 const std::string set_compliance_mode_service_name{"set_compliance_mode"};
-const std::string set_joint_contact_service_name{"set_joint_contact_index"};
+const std::string set_wrist_contact_service_name{"set_wrist_contact_index"};
 
 /////////////////////////////////////////////////////////////
 // Joint space
@@ -49,6 +49,7 @@ const std::string min_singular_value_topic_name{"/sigma_min"};
 const std::string pose_error_topic_name{"/pose_error"};
 
 const std::string demo_state_topic_name{"/state_color"};
+const std::string wrist_contact_index_topic_name{"/panda/wrist_contact_index"};
 
 /////////////////////////////////////////////////////////////
 const std::string panda_traj_move_action_name{"joint_traj_action"};
