@@ -226,7 +226,7 @@ private:
         franka_frame_enum_to_link_name[franka::Frame::kJoint5] = "fr3_link5";
         franka_frame_enum_to_link_name[franka::Frame::kJoint6] = "fr3_link6";
         franka_frame_enum_to_link_name[franka::Frame::kJoint7] = "fr3_link7";
-        franka_frame_enum_to_link_name[franka::Frame::kEndEffector] =
+        franka_frame_enum_to_link_name[franka::Frame::kFlange] =
             "fr3_link8"; // Typically end-effector name
 
         // Store all absolute transforms (from fr3_link0)

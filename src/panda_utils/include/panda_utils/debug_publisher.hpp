@@ -15,6 +15,7 @@
 #include "panda_utils/constants.hpp"
 #include "sensor_msgs/msg/joint_state.hpp"
 #include <optional>
+#include <rclcpp/qos.hpp>
 #include <rclcpp/rclcpp.hpp>
 #include <rclcpp_lifecycle/lifecycle_node.hpp>
 
@@ -87,7 +88,7 @@ class DebugPublisher {
 public:
   debug_data &data() { return pub_data; }
   void publish(rclcpp::Time now);
-  void create_pubs(rclcpp_lifecycle::LifecycleNode::SharedPtr node);
+  void create_pubs(rclcpp_lifecycle::LifecycleNode::SharedPtr node, rclcpp::QoS qos);
   DebugPublisher();
 
 private:

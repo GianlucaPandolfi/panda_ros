@@ -1168,6 +1168,7 @@ void InverseDynamicsController::control_libfranka_sim() {
     for (size_t i = 0; i < 7; i++) {
       gravity(i) = gravity_raw[i];
     }
+    gravity = panda.getGravityVector(current_joints_config_vec);
 
     {
       std::lock_guard<std::mutex> lock(desired_cmd_mutex);

@@ -198,6 +198,7 @@ def generate_launch_description():
             'control_freq': LaunchConfiguration('controller_rate'),
             'clamp': LaunchConfiguration('clamp_effort_control'),
             'use_robot': LaunchConfiguration('use_robot'),
+            'use_franka_sim': LaunchConfiguration('use_franka_sim'),
             'robot_ip': LaunchConfiguration('robot_ip'),
             'world_base_link': LaunchConfiguration('world_base_link')
         }],

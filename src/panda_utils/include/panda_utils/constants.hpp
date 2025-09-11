@@ -80,9 +80,26 @@ const std::vector<std::string> panda_link_names = {
 };
 
 const inline rclcpp::QoS DEFAULT_TOPIC_QOS() {
-  rclcpp::QoS qos(2);
+  rclcpp::QoS qos(1);
   qos.reliability(rclcpp::ReliabilityPolicy::Reliable)
-      .history(rclcpp::HistoryPolicy::KeepLast);
+      .history(rclcpp::HistoryPolicy::KeepLast)
+      .durability(rclcpp::DurabilityPolicy::Volatile);
+  return qos;
+}
+
+const inline rclcpp::QoS CONTROLLER_SUBSCRIBER_QOS() {
+  rclcpp::QoS qos(1);
+  qos.reliability(rclcpp::ReliabilityPolicy::Reliable)
+      .history(rclcpp::HistoryPolicy::KeepLast)
+      .durability(rclcpp::DurabilityPolicy::Volatile);
+  return qos;
+}
+
+const inline rclcpp::QoS CONTROLLER_PUBLISHER_QOS() {
+  rclcpp::QoS qos(1);
+  qos.reliability(rclcpp::ReliabilityPolicy::BestEffort)
+      .history(rclcpp::HistoryPolicy::KeepLast)
+      .durability(rclcpp::DurabilityPolicy::Volatile);
   return qos;
 }
 

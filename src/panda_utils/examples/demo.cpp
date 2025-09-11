@@ -266,7 +266,7 @@ int main(int argc, char **argv) {
   // Home goal definition
   panda_interfaces::action::CartTraj_Goal home_goal;
   home_goal.desired_pose = home_pose;
-  home_goal.total_time = 3.0;
+  home_goal.total_time = 5.0;
 
   // Stop trajectory goal definition
   panda_interfaces::action::StopTraj_Goal stop_traj_goal;
@@ -892,6 +892,7 @@ int main(int argc, char **argv) {
             loop_cartesian_traj_handle = handle;
             RCLCPP_INFO(main_node->get_logger(),
                         "Loop cartesian trajectory accepted");
+            start = main_node->now();
           } else {
             RCLCPP_INFO(main_node->get_logger(),
                         "Loop cartesian trajectory refused");
@@ -914,6 +915,69 @@ int main(int argc, char **argv) {
 
       if ((main_node->now() - start).seconds() > 2.0) {
         RCLCPP_INFO(main_node->get_logger(), "In task state");
+        ////////////////////////////////////////////////////////////////////////////
+        // Start modification
+        cancel_actions();
+        RCLCPP_INFO(main_node->get_logger(),
+                    "Sending velocity and acceleration to 0 exponentially");
+        auto future = stop_traj_action_client->async_send_goal(
+            stop_traj_goal, stop_traj_options);
+        auto fut_return =
+            rclcpp::spin_until_future_complete(confirmation_node, future, 3s);
+        switch (fut_return) {
+        case rclcpp::FutureReturnCode::SUCCESS: {
+          auto handle = future.get();
+          if (handle) {
+            stop_traj_handle = handle;
+            RCLCPP_INFO(main_node->get_logger(), "Stop trajectory accepted");
+          } else {
+            RCLCPP_INFO(main_node->get_logger(), "Stop trajectory refused");
+            break;
+          }
+          break;
+        }
+        case rclcpp::FutureReturnCode::INTERRUPTED: {
+          RCLCPP_ERROR(main_node->get_logger(), "Stop trajectory interrupted");
+          break;
+        }
+        case rclcpp::FutureReturnCode::TIMEOUT: {
+          RCLCPP_ERROR(main_node->get_logger(), "Stop trajectory went timeout");
+          break;
+        } break;
+        };
+
+        while (stop_traj_handle.has_value()) {
+          RCLCPP_INFO(main_node->get_logger(),
+                      "Waiting robot to reach 0 velocity and acceleration");
+          if (!rclcpp::ok()) {
+            break;
+          }
+          rclcpp::sleep_for(2s);
+        }
+
+        compliance_request.cmd = true;
+        auto compliance_future = compliance_mode_client->async_send_request(
+            std::make_shared<panda_interfaces::srv::SetComplianceMode_Request>(
+                compliance_request));
+        bool stopped = false;
+        while (!stopped) {
+
+          auto res = compliance_future.wait_for(10ms);
+          while (res != std::future_status::ready && rclcpp::ok()) {
+            res = compliance_future.wait_for(10ms);
+            RCLCPP_INFO(main_node->get_logger(),
+                        "Robot entering compliance mode");
+          }
+          if (res == std::future_status::ready) {
+            RCLCPP_INFO(main_node->get_logger(),
+                        "Robot stopped and passed in compliance mode");
+            stopped = true;
+            state = SceneState::compliance;
+          }
+        }
+        ////////////////////////////////////////////////////////////////////////////
+        // End modification
+        ////////////////////////////////////////////////////////////////////////////
         if (loop_cartesian_traj_handle.has_value()) {
           RCLCPP_INFO(main_node->get_logger(),
                       "Still executing loop trajectory");
