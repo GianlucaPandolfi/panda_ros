@@ -41,6 +41,7 @@
 #include <chrono>
 #include <cmath>
 #include <cstdlib>
+#include <franka/lowpass_filter.h>
 #include <franka/model.h>
 #include <franka/robot.h>
 #include <geometry_msgs/msg/accel_stamped.hpp>
@@ -606,6 +607,37 @@ public:
                                  panda_franka_model.value(),
                                  this->get_logger());
 
+      // Getting initial pose as the current one
+      desired_pose =
+          std::make_shared<Pose>(get_pose(panda_franka_model.value().pose(
+              franka::Frame::kFlange, panda_franka->readOnce())));
+
+      RCLCPP_INFO_STREAM(this->get_logger(),
+                         "Desired pose is: ["
+                             << desired_pose->position.x << ", "
+                             << desired_pose->position.y << ", "
+                             << desired_pose->position.z << "], ["
+                             << desired_pose->orientation.w << ", "
+                             << desired_pose->orientation.x << ", "
+                             << desired_pose->orientation.y << ", "
+                             << desired_pose->orientation.z << "]");
+
+      RCLCPP_INFO_STREAM(
+          this->get_logger(),
+          "Desired accel is: ["
+              << desired_accel.linear.x << ", " << desired_accel.linear.y
+              << ", " << desired_accel.linear.z << "], ["
+              << desired_accel.angular.x << ", " << desired_accel.angular.y
+              << ", " << desired_accel.angular.z << "]");
+
+      RCLCPP_INFO_STREAM(
+          this->get_logger(),
+          "Desired twist is: ["
+              << desired_twist.linear.x << ", " << desired_twist.linear.y
+              << ", " << desired_twist.linear.z << "], ["
+              << desired_twist.angular.x << ", " << desired_twist.angular.y
+              << ", " << desired_twist.angular.z << "]");
+
       Eigen::Vector<double, 6> KP_{Kp, Kp, Kp, Kp, Kp, Kp};
       // Eigen::Vector<double, 6> KP_{Kp, Kp, Kp, Kp, Kp * 3, Kp * 3, Kp * 4};
       Eigen::Matrix<double, 6, 6> KP = Eigen::Matrix<double, 6, 6>::Identity();
@@ -619,7 +651,8 @@ public:
       Eigen::Vector<double, 6> MD_{Md, Md, Md, Md, Md, Md};
       Eigen::Matrix<double, 6, 6> MD = Eigen::Matrix<double, 6, 6>::Identity();
       MD.diagonal() = MD_;
-      auto MD_1 = MD.inverse();
+      Eigen::Matrix<double, 6, 6> MD_1 = MD.inverse();
+      RCLCPP_INFO_STREAM(this->get_logger(), MD_1);
 
       // Coefficient for dynamic lambda damping
       double alpha = this->get_parameter("alpha").as_double();
@@ -630,6 +663,8 @@ public:
       Eigen::Matrix4d matrix_ident = ident.matrix();
       std::array<double, 16> ident_transform;
       Eigen::Map<Eigen::Matrix4d>(ident_transform.data()) = matrix_ident;
+      Eigen::Vector<double, 7> last_joints_speed =
+          Eigen::Vector<double, 7>::Zero();
 
       // Get jacobian function
 
@@ -643,10 +678,14 @@ public:
             return get_jacobian(this->panda_franka_model->zeroJacobian(
                 franka::Frame::kFlange, state));
           };
+
+      bool first_callback_run = true;
+
       robot_control_callback =
           [this, KP, KD, alpha, MD, MD_1, k_max, eps, ident_transform,
-           get_jacob](const franka::RobotState &state,
-                      franka::Duration) -> franka::Torques {
+           get_jacob, &last_joints_speed,
+           &first_callback_run](const franka::RobotState &state,
+                                franka::Duration dt) -> franka::Torques {
         if (!(start_flag.load() && rclcpp::ok())) {
           // Send last commanded joint effort command
           return franka::MotionFinished(franka::Torques(state.tau_J_d));
@@ -663,7 +702,9 @@ public:
 
         Eigen::Vector<double, 7> current_joints_speed;
         for (size_t i = 0; i < 7; i++) {
-          current_joints_speed[i] = state.dq[i];
+          // current_joints_speed[i] = state.dq[i];
+          current_joints_speed[i] = franka::lowpassFilter(
+              dt.toSec(), state.dq[i], last_joints_speed[i], 50.0);
         }
 
         // Get current pose and jacobian according to stiffness or flange
@@ -683,18 +724,11 @@ public:
           jacobian = get_jacobian(panda_franka_model->zeroJacobian(
               franka::Frame::kStiffness, state));
         } else {
-          panda_franka->setK(ident_transform);
+          // panda_franka->setK(ident_transform);
           current_pose =
               get_pose(panda_franka_model->pose(franka::Frame::kFlange, state));
           jacobian = get_jacobian(
               panda_franka_model->zeroJacobian(franka::Frame::kFlange, state));
-        }
-
-        if (jacobian.array().isInf().any() || jacobian.array().isNaN().any()) {
-          RCLCPP_ERROR_STREAM(this->get_logger(),
-                              "Value(s) in the jacobian is NaN/Inf");
-          start_flag.store(false);
-          return franka::MotionFinished(franka::Torques(state.tau_J_d));
         }
 
         Eigen::Quaterniond current_quat{};
@@ -732,14 +766,6 @@ public:
           error_pose_vec(3) = error_quat.x();
           error_pose_vec(4) = error_quat.y();
           error_pose_vec(5) = error_quat.z();
-          // Check for NaN or Inf
-          if (error_pose_vec.array().isInf().any() ||
-              error_pose_vec.array().isNaN().any()) {
-            RCLCPP_ERROR_STREAM(this->get_logger(),
-                                "Value(s) in the error_pose_vec is NaN/Inf");
-            start_flag.store(false);
-            return franka::MotionFinished(franka::Torques(state.tau_J_d));
-          }
         }
 
         // B(q)
@@ -751,13 +777,6 @@ public:
             mass_matrix(j, i) = mass_matrix_raw[i * 7 + j];
           }
         }
-        if (mass_matrix.array().isInf().any() ||
-            mass_matrix.array().isNaN().any()) {
-          RCLCPP_ERROR_STREAM(this->get_logger(),
-                              "Value(s) in the mass_matrix is NaN/Inf");
-          start_flag.store(false);
-          return franka::MotionFinished(franka::Torques(state.tau_J_d));
-        }
 
         // Eigen::Map<const Eigen::Matrix<double, 7, 1>> coriolis(
         //     this->panda_franka_model.value().coriolis(state).data());
@@ -766,12 +785,6 @@ public:
         Eigen::Vector<double, 7> coriolis;
         for (size_t i = 0; i < 7; i++) {
           coriolis(i) = coriolis_raw[i];
-        }
-        if (coriolis.array().isInf().any() || coriolis.array().isNaN().any()) {
-          RCLCPP_ERROR_STREAM(this->get_logger(),
-                              "Value(s) in the coriolis is NaN/Inf");
-          start_flag.store(false);
-          return franka::MotionFinished(franka::Torques(state.tau_J_d));
         }
 
         // Calculate jacobian SVD
@@ -785,25 +798,8 @@ public:
         Eigen::Matrix<double, 7, 6> jacobian_pinv =
             compute_jacob_pseudoinv(jacobian, lambda);
 
-        if (jacobian_pinv.array().isInf().any() ||
-            jacobian_pinv.array().isNaN().any()) {
-          RCLCPP_ERROR_STREAM(this->get_logger(),
-                              "Value(s) in the jacobian pinv is NaN/Inf");
-          start_flag.store(false);
-          return franka::MotionFinished(franka::Torques(state.tau_J_d));
-        }
-
-        // Eigen::Matrix<double, 6, 6> B_a =
-        //     (jacobian * mass_matrix.inverse() * jacobian.transpose() +
-        //      lambda * Eigen::Matrix<double, 6, 6>::Identity())
-        //         .inverse();
-        //
-        // Eigen::Matrix<double, 7, 6> jacobian_cap =
-        //     mass_matrix.inverse() * jacobian.transpose() * B_a;
-        //
-        // Eigen::Matrix<double, 7, 7> tau_projector =
-        //     Eigen::Matrix<double, 7, 7>::Identity() -
-        //     jacobian.transpose() * jacobian_cap.transpose();
+        RCLCPP_INFO_STREAM_ONCE(this->get_logger(),
+                                "jacob pinv: " << jacobian_pinv);
 
         Eigen::Vector<double, 6> current_twist;
         Eigen::Vector<double, 6> error_twist;
@@ -835,14 +831,6 @@ public:
           error_twist = desired_twist_vec - current_twist;
         }
 
-        if (error_twist.array().isInf().any() ||
-            error_twist.array().isNaN().any()) {
-          RCLCPP_ERROR_STREAM(this->get_logger(),
-                              "Value(s) in the error twist is NaN/Inf");
-          start_flag.store(false);
-          return franka::MotionFinished(franka::Torques(state.tau_J_d));
-        }
-
         {
           std::lock_guard<std::mutex> lock(desired_accel_mutex);
           if (compliance_mode.load()) {
@@ -864,35 +852,57 @@ public:
                 (
 
                     MD * desired_accel_vec + KD * error_twist +
-                    KP * error_pose_vec -
-                    MD *
-                        get_j_dot(get_jacob, current_joints_config_vec,
-                                  current_joints_speed) *
-                        current_joints_speed
+                    KP * error_pose_vec
+                    // -
+                    //   MD *
+                    //       get_j_dot(get_jacob, current_joints_config_vec,
+                    //                 current_joints_speed) *
+                    //       current_joints_speed
                     // - h_e
 
                 );
           }
         }
 
-        // Inverse dynamics torque commanded
-        // Eigen::Vector<double, 7> control_input_vec =
-        //     mass_matrix * y + coriolis + tau_ext;
         Eigen::Vector<double, 7> control_input_vec = mass_matrix * y + coriolis;
-
-        if (control_input_vec.array().isInf().any() ||
-            control_input_vec.array().isNaN().any()) {
-          RCLCPP_ERROR_STREAM(this->get_logger(),
-                              "Value(s) in the control input vec is NaN/Inf");
-          start_flag.store(false);
-          return franka::MotionFinished(franka::Torques(state.tau_J_d));
-        }
 
         // Clamp tau
         clamp_control(control_input_vec);
 
+        // Safety checks
+        for (int i = 0; i < control_input_vec.size(); i++) {
+          if ((abs(control_input_vec[i] - last_control_input[i]) / dt.toSec()) >
+              effort_speed_limits[i]) {
+            panda_franka->stop();
+            start_flag.store(false);
+            RCLCPP_ERROR_STREAM(this->get_logger(),
+                                "Torque variation over limit");
+            return franka::MotionFinished(franka::Torques(state.tau_J_d));
+          } else if (abs(control_input_vec[i]) >=
+                     8.5 * effort_limits[i] / 10.0) {
+            panda_franka->stop();
+            start_flag.store(false);
+            RCLCPP_ERROR_STREAM(this->get_logger(),
+                                "Torque abs value over limit (85%)");
+            return franka::MotionFinished(franka::Torques(state.tau_J_d));
+          } else if (abs(state.dq[i]) >= 0.4) {
+            panda_franka->stop();
+            start_flag.store(false);
+            RCLCPP_ERROR_STREAM(this->get_logger(),
+                                "Joint velocity over the safety value 0.4");
+            return franka::MotionFinished(franka::Torques(state.tau_J_d));
+          }
+        }
+
         // Apply control
-        last_control_input = control_input_vec;
+
+        if (first_callback_run) {
+          last_control_input = control_input_vec.Zero();
+          first_callback_run = false;
+        } else {
+          last_control_input = control_input_vec;
+        }
+
         std::array<double, 7> tau;
         for (size_t i = 0; i < 7; ++i) {
           tau[i] = control_input_vec[i];
@@ -907,7 +917,9 @@ public:
         // Fill struct for debug prints
         if (print_debug.mut.try_lock()) {
           print_debug.has_data = true;
-          print_debug.robot_state = state;
+          // Deep copy
+          print_debug.robot_state = franka::RobotState(state);
+          print_debug.sigma_min = sigma_min;
           print_debug.tau_d_last = tau;
           print_debug.gravity = panda_franka_model.value().gravity(state);
           print_debug.tau_ext = tau_ext;
@@ -1000,6 +1012,20 @@ public:
                              << desired_pose->orientation.y << ", "
                              << desired_pose->orientation.z << "]");
 
+      RCLCPP_INFO_STREAM(
+          this->get_logger(),
+          "Desired accel is: ["
+              << desired_accel_vec[0] << ", " << desired_accel_vec[1] << ", "
+              << desired_accel_vec[2] << "], [" << desired_accel_vec[3] << ", "
+              << desired_accel_vec[4] << ", " << desired_accel_vec[5] << "]");
+
+      RCLCPP_INFO_STREAM(
+          this->get_logger(),
+          "Desired twist is: ["
+              << desired_twist_vec[0] << ", " << desired_twist_vec[1] << ", "
+              << desired_twist_vec[2] << "], [" << desired_twist_vec[3] << ", "
+              << desired_twist_vec[4] << ", " << desired_twist_vec[5] << "]");
+
       old_quaternion.w() = desired_pose->orientation.w;
       old_quaternion.x() = desired_pose->orientation.x;
       old_quaternion.y() = desired_pose->orientation.y;
@@ -1029,7 +1055,8 @@ public:
           // EE to K transform thread
           // std::thread{[this]() {
           //   RCLCPP_INFO_STREAM(this->get_logger(),
-          //                      "Started EE_to_K (wrist in touch) thread");
+          //                      "Started EE_to_K (wrist in touch)
+          //                      thread");
           //   while (start_flag.load() && rclcpp::ok()) {
           //     try {
           //       if (wrist_contact_frame.has_value()) {
@@ -1060,7 +1087,8 @@ public:
           //     }
           //   }
           //   RCLCPP_INFO_STREAM(this->get_logger(),
-          //                      "Stopped EE_to_K (wrist in touch) thread");
+          //                      "Stopped EE_to_K (wrist in touch)
+          //                      thread");
           // }}.detach();
 
           // TFs publisher thread according to fr3 link names
@@ -1111,117 +1139,126 @@ public:
           // }}.detach();
 
           // Debug publisher thread
-          // std::thread{[this]() {
-          //   using namespace std::chrono_literals;
-          //   JointsEffort cmd;
-          //   PoseStamped pose_debug;
-          //   TwistStamped twist_debug;
-          //   AccelStamped accel_debug;
-          //   panda_interfaces::msg::DoubleStamped double_stamped;
-          //   panda_interfaces::msg::DoubleArrayStamped arr_stamped;
-          //   RCLCPP_INFO(this->get_logger(), "Started print control thread");
-          //   while (start_flag.load() && rclcpp::ok()) {
-          //     std::this_thread::sleep_for(1ms);
-          //     if (this->print_debug.mut.try_lock()) {
-          //       if (print_debug.has_data) {
-          //
-          //         // DEBUG
-          //         cmd.header.stamp = this->now();
-          //         pose_debug.header.stamp = this->now();
-          //         twist_debug.header.stamp = this->now();
-          //         accel_debug.header.stamp = this->now();
-          //         arr_stamped.header.stamp = this->now();
-          //         double_stamped.header.stamp = this->now();
-          //
-          //         // Publish current pose and joint state
-          //         publish_robot_state_libfranka(print_debug.robot_state);
-          //
-          //         Eigen::Vector<double, 7> current_joints_config_vec;
-          //         for (int i = 0; i < current_joints_config_vec.size(); i++)
-          //         {
-          //           current_joints_config_vec[i] =
-          //           print_debug.robot_state.q[i];
-          //         }
-          //         auto jacobian =
-          //         get_jacobian(panda_franka_model->zeroJacobian(
-          //             franka::Frame::kFlange, print_debug.robot_state));
-          //         double_stamped.data = manip_index(jacobian);
-          //
-          //         manipulability_index_debug->publish(double_stamped);
-          //
-          //         Eigen::Vector<double, 7> manip_ind_gradient =
-          //             manip_grad(current_joints_config_vec);
-          //         for (int i = 0; i < 7; i++) {
-          //           arr_stamped.data[i] = manip_ind_gradient[i];
-          //         }
-          //         manipulability_index_grad_debug->publish(arr_stamped);
-          //
-          //         for (int i = 0; i < 7; i++) {
-          //           cmd.effort_values[i] = print_debug.tau_d_last[i];
-          //         }
-          //         robot_joint_efforts_pub_debug->publish(cmd);
-          //
-          //         for (int i = 0; i < 7; i++) {
-          //           cmd.effort_values[i] = print_debug.gravity[i];
-          //         }
-          //         gravity_contribute_debug->publish(cmd);
-          //
-          //         // POSE
-          //
-          //         pose_debug.pose = get_pose(panda_franka_model->pose(
-          //             franka::Frame::kFlange, print_debug.robot_state));
-          //         current_pose_debug->publish(pose_debug);
-          //
-          //         pose_debug.pose = *desired_pose;
-          //         desired_pose_debug->publish(pose_debug);
-          //
-          //         // VELOCITY
-          //         Eigen::Vector<double, 7> joint_velocity;
-          //         for (size_t i = 0; i < 7; i++) {
-          //           joint_velocity[i] = print_debug.robot_state.dq[i];
-          //         }
-          //         Eigen::Vector<double, 6> current_twist =
-          //             jacobian * joint_velocity;
-          //         twist_debug.twist.linear.x = current_twist[0];
-          //         twist_debug.twist.linear.y = current_twist[1];
-          //         twist_debug.twist.linear.z = current_twist[2];
-          //
-          //         twist_debug.twist.angular.x = current_twist[3];
-          //         twist_debug.twist.angular.y = current_twist[4];
-          //         twist_debug.twist.angular.z = current_twist[5];
-          //
-          //         current_velocity_debug->publish(twist_debug);
-          //
-          //         twist_debug.twist.linear.x =
-          //             current_twist[0] - desired_twist_vec[0];
-          //         twist_debug.twist.linear.y =
-          //             current_twist[1] - desired_twist_vec[1];
-          //         twist_debug.twist.linear.z =
-          //             current_twist[2] - desired_twist_vec[2];
-          //
-          //         twist_debug.twist.angular.x =
-          //             current_twist[3] - desired_twist_vec[3];
-          //         twist_debug.twist.angular.y =
-          //             current_twist[4] - desired_twist_vec[4];
-          //         twist_debug.twist.angular.z =
-          //             current_twist[5] - desired_twist_vec[5];
-          //
-          //         velocity_error_debug->publish(twist_debug);
-          //
-          //         twist_debug.twist = desired_twist;
-          //         desired_velocity_debug->publish(twist_debug);
-          //
-          //         accel_debug.accel = desired_accel;
-          //         desired_acceleration_debug->publish(accel_debug);
-          //
-          //         print_debug.has_data = false;
-          //       }
-          //
-          //       print_debug.mut.unlock();
-          //     }
-          //   }
-          //   RCLCPP_INFO(this->get_logger(), "Shutdown print control thread");
-          // }}.detach();
+          std::thread{[this]() {
+            using namespace std::chrono_literals;
+            JointsEffort cmd;
+            PoseStamped pose_debug;
+            TwistStamped twist_debug;
+            AccelStamped accel_debug;
+            panda_interfaces::msg::DoubleStamped double_stamped;
+            panda_interfaces::msg::DoubleArrayStamped arr_stamped;
+            joint_state_to_pub.position.resize(7);
+            joint_state_to_pub.velocity.resize(7);
+            joint_state_to_pub.effort.resize(7);
+            joint_state_to_pub.name =
+                std::vector<std::string>{"joint1", "joint2", "joint3", "joint4",
+                                         "joint5", "joint6", "joint7"};
+            arr_stamped.data.resize(7);
+            RCLCPP_INFO(this->get_logger(), "Started print control thread");
+            while (start_flag.load() && rclcpp::ok()) {
+              std::this_thread::sleep_for(1ms);
+              if (this->print_debug.mut.try_lock()) {
+                if (print_debug.has_data) {
+
+                  // DEBUG
+                  cmd.header.stamp = this->now();
+                  pose_debug.header.stamp = this->now();
+                  twist_debug.header.stamp = this->now();
+                  accel_debug.header.stamp = this->now();
+                  arr_stamped.header.stamp = this->now();
+                  double_stamped.header.stamp = this->now();
+
+                  // Publish current pose and joint state
+                  publish_robot_state_libfranka(print_debug.robot_state);
+
+                  Eigen::Vector<double, 7> current_joints_config_vec;
+                  for (int i = 0; i < current_joints_config_vec.size(); i++) {
+                    current_joints_config_vec[i] = print_debug.robot_state.q[i];
+                  }
+                  auto jacobian = get_jacobian(panda_franka_model->zeroJacobian(
+                      franka::Frame::kFlange, print_debug.robot_state));
+                  double_stamped.data = manip_index(jacobian);
+
+                  manipulability_index_debug->publish(double_stamped);
+
+                  if (print_debug.sigma_min.has_value()) {
+                    double_stamped.data = print_debug.sigma_min.value();
+                    min_singular_val_pub->publish(double_stamped);
+                  }
+
+                  Eigen::Vector<double, 7> manip_ind_gradient =
+                      manip_grad(current_joints_config_vec);
+                  for (int i = 0; i < 7; i++) {
+                    arr_stamped.data[i] = manip_ind_gradient[i];
+                  }
+                  manipulability_index_grad_debug->publish(arr_stamped);
+
+                  for (int i = 0; i < 7; i++) {
+                    cmd.effort_values[i] = print_debug.tau_d_last[i];
+                  }
+                  robot_joint_efforts_pub_debug->publish(cmd);
+
+                  for (int i = 0; i < 7; i++) {
+                    cmd.effort_values[i] = print_debug.gravity[i];
+                  }
+                  gravity_contribute_debug->publish(cmd);
+
+                  // POSE
+
+                  pose_debug.pose = get_pose(panda_franka_model->pose(
+                      franka::Frame::kFlange, print_debug.robot_state));
+                  current_pose_debug->publish(pose_debug);
+
+                  pose_debug.pose = *desired_pose;
+                  desired_pose_debug->publish(pose_debug);
+
+                  // VELOCITY
+                  Eigen::Vector<double, 7> joint_velocity;
+                  for (size_t i = 0; i < 7; i++) {
+                    joint_velocity[i] = print_debug.robot_state.dq[i];
+                  }
+                  Eigen::Vector<double, 6> current_twist =
+                      jacobian * joint_velocity;
+                  twist_debug.twist.linear.x = current_twist[0];
+                  twist_debug.twist.linear.y = current_twist[1];
+                  twist_debug.twist.linear.z = current_twist[2];
+
+                  twist_debug.twist.angular.x = current_twist[3];
+                  twist_debug.twist.angular.y = current_twist[4];
+                  twist_debug.twist.angular.z = current_twist[5];
+
+                  current_velocity_debug->publish(twist_debug);
+
+                  twist_debug.twist.linear.x =
+                      current_twist[0] - desired_twist_vec[0];
+                  twist_debug.twist.linear.y =
+                      current_twist[1] - desired_twist_vec[1];
+                  twist_debug.twist.linear.z =
+                      current_twist[2] - desired_twist_vec[2];
+
+                  twist_debug.twist.angular.x =
+                      current_twist[3] - desired_twist_vec[3];
+                  twist_debug.twist.angular.y =
+                      current_twist[4] - desired_twist_vec[4];
+                  twist_debug.twist.angular.z =
+                      current_twist[5] - desired_twist_vec[5];
+
+                  velocity_error_debug->publish(twist_debug);
+
+                  twist_debug.twist = desired_twist;
+                  desired_velocity_debug->publish(twist_debug);
+
+                  accel_debug.accel = desired_accel;
+                  desired_acceleration_debug->publish(accel_debug);
+
+                  print_debug.has_data = false;
+                }
+
+                print_debug.mut.unlock();
+              }
+            }
+            RCLCPP_INFO(this->get_logger(), "Shutdown print control thread");
+          }}.detach();
 
           RCLCPP_INFO_STREAM(this->get_logger(),
                              "Starting control thread with real time robot");
@@ -1414,8 +1451,8 @@ private:
   Pose::SharedPtr desired_pose;
   std::mutex desired_twist_mutex;
   std::mutex desired_accel_mutex;
-  Eigen::Vector<double, 6> desired_twist_vec;
-  Eigen::Vector<double, 6> desired_accel_vec;
+  Eigen::Vector<double, 6> desired_twist_vec = Eigen::Vector<double, 6>::Zero();
+  Eigen::Vector<double, 6> desired_accel_vec = Eigen::Vector<double, 6>::Zero();
   Twist desired_twist;
   Accel desired_accel;
 
@@ -1451,7 +1488,7 @@ private:
     index_0 = joint_limit_index(current_joint_config);
 
     // Calculating gradient
-    for (int i = 0; i < 7; i++) {
+    for (int i = 0; i < forward_joint_config.size(); i++) {
 
       forward_joint_config = current_joint_config;
       forward_joint_config[i] = forward_joint_config[i] + step;
@@ -1464,7 +1501,7 @@ private:
   double
   joint_limit_index(const Eigen::Vector<double, 7> &current_joint_config) {
     double index = 0;
-    for (int i = 0; i < 7; i++) {
+    for (int i = 0; i < current_joint_config.size(); i++) {
       index = index + 1 / (current_joint_config[i] - joint_min_limits[i]) +
               1 / (joint_max_limits[i] - current_joint_config[i]);
     }
@@ -1478,7 +1515,7 @@ private:
     Eigen::Vector<double, 7> manip_grad;
     Eigen::Matrix<double, 6, 7> jacob;
     franka::RobotState current_state;
-    for (int i = 0; i < 7; i++) {
+    for (int i = 0; i < current_joint_config.size(); i++) {
       current_state.q[i] = current_joint_config[i];
     }
 
@@ -1622,7 +1659,7 @@ private:
 
     // Publish joint state
     joint_state_to_pub.header.stamp = this->now();
-    for (size_t i = 0; i < 7; i++) {
+    for (size_t i = 0; i < joint_state_to_pub.position.size(); i++) {
       joint_state_to_pub.position[i] = state.q[i];
       joint_state_to_pub.velocity[i] = state.dq[i];
       joint_state_to_pub.effort[i] = state.tau_J[i];
@@ -1896,7 +1933,8 @@ void ImpedanceController::control() {
                  get_j_dot(get_jacob, current_joints_config_vec,
                            current_joints_speed) *
                  current_joints_speed
-             // MD * panda.computeHessianTimesQDot(current_joints_config_vec,
+             // MD *
+             // panda.computeHessianTimesQDot(current_joints_config_vec,
              //                                    current_joints_speed,
              //                                    frame_id_name)
              // -
@@ -1951,20 +1989,20 @@ void ImpedanceController::control() {
       debug_pub.data().error_pose_vec.head(3) = error_pose_vec.head(3);
       debug_pub.data().error_pose_vec.tail(3) = error_pose_vec.tail(3);
       debug_pub.data().error_pose_vec(3) = 1.0;
-      for (int i = 0; i < 7; i++) {
+      for (int i = 0; i < gravity.size(); i++) {
         debug_pub.data().gravity[i] = gravity[i];
       }
-      for (int i = 0; i < 7; i++) {
+      for (int i = 0; i < control_input.size(); i++) {
         debug_pub.data().tau_d_last[i] = control_input[i];
       }
       debug_pub.data().y = y;
       debug_pub.data().y_cartesian = y_cartesian;
 
       // Robot state
-      for (int i = 0; i < 7; i++) {
+      for (int i = 0; i < current_joints_config_vec.size(); i++) {
         debug_pub.data().robot_state.q[i] = current_joints_config_vec[i];
       }
-      for (int i = 0; i < 7; i++) {
+      for (int i = 0; i < current_joints_speed.size(); i++) {
         debug_pub.data().robot_state.dq[i] = current_joints_speed[i];
       }
       debug_pub.data().robot_state.O_T_EE =
@@ -2229,7 +2267,7 @@ void ImpedanceController::control_libfranka_sim() {
     std::array<double, 7> coriolis_raw =
         this->panda_franka_model.value().coriolis(state);
     Eigen::Vector<double, 7> coriolis;
-    for (size_t i = 0; i < 7; i++) {
+    for (size_t i = 0; i < coriolis_raw.size(); i++) {
       coriolis(i) = coriolis_raw[i];
     }
     if (coriolis.array().isInf().any() || coriolis.array().isNaN().any()) {
@@ -2246,7 +2284,7 @@ void ImpedanceController::control_libfranka_sim() {
 
     std::array<double, 7> gravity_raw =
         this->panda_franka_model.value().gravity(state);
-    for (size_t i = 0; i < 7; i++) {
+    for (size_t i = 0; i < gravity_raw.size(); i++) {
       gravity(i) = gravity_raw[i];
     }
     gravity = panda.getGravityVector(current_joints_config_vec);
@@ -2356,9 +2394,26 @@ void ImpedanceController::control_libfranka_sim() {
     // Save last control input
     //
     last_control_input = control_input;
+    std::array<double, 7> tau;
+    for (size_t i = 0; i < control_input.size(); ++i) {
+      tau[i] = control_input[i];
+    }
 
     pose_debug.pose = current_pose;
     robot_pose_pub->tryPublish(pose_debug);
+
+    // Fill struct for debug prints
+    if (print_debug.mut.try_lock()) {
+      print_debug.has_data = true;
+      // Deep copy
+      print_debug.robot_state = franka::RobotState(state);
+      print_debug.sigma_min = sigma_min;
+      print_debug.tau_d_last = tau;
+      print_debug.gravity = panda_franka_model.value().gravity(state);
+      print_debug.tau_ext = tau_ext;
+      print_debug.h_e = h_e;
+      print_debug.mut.unlock();
+    }
 
     if (debug_pub.data().mut.try_lock()) {
 
@@ -2373,20 +2428,20 @@ void ImpedanceController::control_libfranka_sim() {
       debug_pub.data().error_pose_vec.head(3) = error_pose_vec.head(3);
       debug_pub.data().error_pose_vec.tail(3) = error_pose_vec.tail(3);
       debug_pub.data().error_pose_vec(3) = 1.0;
-      for (int i = 0; i < 7; i++) {
+      for (int i = 0; i < gravity.size(); i++) {
         debug_pub.data().gravity[i] = gravity[i];
       }
-      for (int i = 0; i < 7; i++) {
+      for (int i = 0; i < control_input.size(); i++) {
         debug_pub.data().tau_d_last[i] = control_input[i];
       }
       debug_pub.data().y = y;
       debug_pub.data().y_cartesian = y_cartesian;
 
       // Robot state
-      for (int i = 0; i < 7; i++) {
+      for (int i = 0; i < current_joints_config_vec.size(); i++) {
         debug_pub.data().robot_state.q[i] = current_joints_config_vec[i];
       }
-      for (int i = 0; i < 7; i++) {
+      for (int i = 0; i < current_joints_speed.size(); i++) {
         debug_pub.data().robot_state.dq[i] = current_joints_speed[i];
       }
       debug_pub.data().robot_state.O_T_EE = get_transform_matrix(current_pose);
