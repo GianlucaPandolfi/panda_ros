@@ -238,10 +238,12 @@ public:
         "debug/cmd/gravity", panda_interface_names::DEFAULT_TOPIC_QOS());
 
     position_error_debug = this->create_publisher<JointsPos>(
-        "debug/error/joint_position", panda_interface_names::DEFAULT_TOPIC_QOS());
+        "debug/error/joint_position",
+        panda_interface_names::DEFAULT_TOPIC_QOS());
 
     velocity_error_debug = this->create_publisher<JointsPos>(
-        "debug/error/joint_velocity", panda_interface_names::DEFAULT_TOPIC_QOS());
+        "debug/error/joint_velocity",
+        panda_interface_names::DEFAULT_TOPIC_QOS());
 
     desired_position_debug = this->create_publisher<JointsPos>(
         "debug/desired_joint_position",
@@ -297,11 +299,11 @@ public:
             panda_interface_names::set_compliance_mode_service_name,
             compliance_mode_cb);
 
-    robot_pose_pub = std::make_shared<
-        realtime_tools::RealtimePublisher<geometry_msgs::msg::PoseStamped>>(
-        this->create_publisher<geometry_msgs::msg::PoseStamped>(
-            panda_interface_names::panda_pose_state_topic_name,
-            panda_interface_names::DEFAULT_TOPIC_QOS()));
+    // robot_pose_pub = std::make_shared<
+    //     realtime_tools::RealtimePublisher<geometry_msgs::msg::PoseStamped>>(
+    //     this->create_publisher<geometry_msgs::msg::PoseStamped>(
+    //         panda_interface_names::panda_pose_state_topic_name,
+    //         panda_interface_names::DEFAULT_TOPIC_QOS()));
 
     joint_states_pub =
         std::make_shared<realtime_tools::RealtimePublisher<JointState>>(
@@ -698,8 +700,8 @@ private:
   Publisher<std_msgs::msg::Float64>::SharedPtr mass_matrix_val_debug{};
 
   // Robot pose publisher
-  realtime_tools::RealtimePublisher<geometry_msgs::msg::PoseStamped>::SharedPtr
-      robot_pose_pub{};
+  // realtime_tools::RealtimePublisher<geometry_msgs::msg::PoseStamped>::SharedPtr
+  //     robot_pose_pub{};
   realtime_tools::RealtimePublisher<sensor_msgs::msg::JointState>::SharedPtr
       joint_states_pub{};
 
@@ -847,7 +849,7 @@ private:
         panda_franka_model.value().pose(franka::Frame::kJoint7, state));
     // current_pose.pose = convertMatrixToPose(state.O_T_EE);
     current_pose.header.stamp = this->now();
-    robot_pose_pub->tryPublish(current_pose);
+    // robot_pose_pub->tryPublish(current_pose);
 
     // Publish joint state
     joint_state_to_pub.header.stamp = this->now();
@@ -1046,7 +1048,7 @@ void InverseDynamicsController::control() {
     geometry_msgs::msg::PoseStamped current_pose;
     current_pose.pose = panda.getPose(frame_id_name);
     current_pose.header.stamp = this->now();
-    robot_pose_pub->tryPublish(current_pose);
+    // robot_pose_pub->tryPublish(current_pose);
 
     // Sleep
     //
@@ -1275,7 +1277,7 @@ void InverseDynamicsController::control_libfranka_sim() {
     geometry_msgs::msg::PoseStamped current_pose;
     current_pose.pose = panda.getPose(frame_id_name);
     current_pose.header.stamp = this->now();
-    robot_pose_pub->tryPublish(current_pose);
+    // robot_pose_pub->tryPublish(current_pose);
 
     // Sleep
     //

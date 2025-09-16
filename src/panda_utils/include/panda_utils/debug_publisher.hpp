@@ -14,6 +14,7 @@
 #include "panda_interfaces/msg/joints_pos.hpp"
 #include "panda_utils/constants.hpp"
 #include "sensor_msgs/msg/joint_state.hpp"
+#include <Eigen/src/Core/Matrix.h>
 #include <optional>
 #include <rclcpp/qos.hpp>
 #include <rclcpp/rclcpp.hpp>
@@ -40,13 +41,13 @@ struct debug_data {
   bool has_data;
 
   // Last commanded tau
-  std::array<double, 7> tau_d_last;
+  std::optional<std::array<double, 7>> tau_d_last = std::array<double, 7>{};
 
   // Robot internal state in franka::RobotState compact struct
-  franka::RobotState robot_state;
+  std::optional<franka::RobotState> robot_state;
 
   // Gravity vector
-  std::array<double, 7> gravity;
+  std::optional<std::array<double, 7>> gravity = std::array<double, 7>{};
 
   // DLS lambda
   std::optional<double> lambda;
@@ -55,17 +56,21 @@ struct debug_data {
   std::optional<double> sigma_min;
 
   // control law y e.g. tau = B * y +  n
-  std::optional<Eigen::Vector<double, 7>> y;
+  std::optional<Eigen::Vector<double, 7>> y = Eigen::Vector<double, 7>{};
 
   // Coriolis term
-  std::optional<Eigen::Vector<double, 7>> coriolis;
+  std::optional<Eigen::Vector<double, 7>> coriolis = Eigen::Vector<double, 7>{};
 
   // control law corrective cartesian component, before inverse jacobian
   // multiplication
-  std::optional<Eigen::Vector<double, 6>> y_cartesian;
+  std::optional<Eigen::Vector<double, 6>> y_cartesian =
+      Eigen::Vector<double, 6>{};
 
   // Desired pose
   std::optional<Pose> des_pose;
+
+  // Current pose
+  std::optional<Pose> current_pose;
 
   // Desired twist
   std::optional<Twist> des_twist;
@@ -74,19 +79,21 @@ struct debug_data {
   std::optional<Accel> des_accel;
 
   // Current twist
-  Eigen::Vector<double, 6> current_twist;
-  
+  std::optional<Eigen::Vector<double, 6>> current_twist =
+      Eigen::Vector<double, 6>{};
+
   // Current Jdot * qdot
-  std::optional<Eigen::Vector<double, 6>> current_j_dot_q_dot;
+  std::optional<Eigen::Vector<double, 6>> current_j_dot_q_dot =
+      Eigen::Vector<double, 6>{};
 
   // Pose error (Quaternion as w, x, y, z)
   Eigen::Vector<double, 7> error_pose_vec;
 
   // External forces contribute in control law
-  std::optional<Eigen::Vector<double, 6>> h_e;
-  
+  std::optional<Eigen::Vector<double, 6>> h_e = Eigen::Vector<double, 6>{};
+
   // Tau external contribute in control law
-  std::optional<Eigen::Vector<double, 7>> tau_ext;
+  std::optional<Eigen::Vector<double, 7>> tau_ext = Eigen::Vector<double, 7>{};
 };
 
 class DebugPublisher {
@@ -94,7 +101,8 @@ class DebugPublisher {
 public:
   debug_data &data() { return pub_data; }
   void publish(rclcpp::Time now);
-  void create_pubs(rclcpp_lifecycle::LifecycleNode::SharedPtr node, rclcpp::QoS qos);
+  void create_pubs(rclcpp_lifecycle::LifecycleNode::SharedPtr node,
+                   rclcpp::QoS qos);
   DebugPublisher();
 
 private:

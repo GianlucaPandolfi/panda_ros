@@ -20,6 +20,7 @@
 #include <rclcpp_action/create_client.hpp>
 #include <rclcpp_action/rclcpp_action.hpp>
 #include <string>
+#include <thread>
 #include <unsupported/Eigen/CXX11/src/Tensor/TensorFFT.h>
 #include <vector>
 
@@ -309,6 +310,12 @@ int main(int argc, char *argv[]) {
           RCLCPP_INFO_STREAM(node->get_logger(),
                              "Time left: " << feedback->time_left << "[s].");
         };
+
+    using namespace std::chrono_literals;
+    RCLCPP_INFO_STREAM(node->get_logger(), "Sleeping for 2s and then launching action");
+    std::this_thread::sleep_for(2s);
+    RCLCPP_INFO_STREAM(node->get_logger(), "LAUNCHING ACTION");
+
     auto future_goal_handle =
         cart_traj_action_client->async_send_goal(cart_goal, goal_options);
     if (rclcpp::spin_until_future_complete(node, future_goal_handle) !=

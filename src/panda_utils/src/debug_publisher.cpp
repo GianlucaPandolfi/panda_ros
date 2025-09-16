@@ -1,4 +1,5 @@
 #include "panda_utils/debug_publisher.hpp"
+#include "panda_utils/constants.hpp"
 #include "panda_utils/utils_func.hpp"
 #include <rclcpp/node.hpp>
 #include <rclcpp/time.hpp>
@@ -32,8 +33,8 @@ void DebugPublisher::create_pubs(
   desired_acceleration_debug =
       node->create_publisher<AccelStamped>("debug/desired_acceleration", qos);
 
-  current_pose_debug =
-      node->create_publisher<PoseStamped>("debug/current_pose", qos);
+  current_pose_debug = node->create_publisher<PoseStamped>(
+      panda_interface_names::panda_pose_state_topic_name, qos);
 
   current_velocity_debug =
       node->create_publisher<TwistStamped>("debug/current_velocity", qos);
@@ -83,6 +84,8 @@ void DebugPublisher::create_pubs(
   min_singular_val_pub =
       node->create_publisher<panda_interfaces::msg::DoubleStamped>(
           panda_interface_names::min_singular_value_topic_name, qos);
+
+  RCLCPP_INFO(node->get_logger(), "Created pubs correctly");
 }
 
 void DebugPublisher::assign_time(rclcpp::Time now) {
@@ -97,9 +100,6 @@ void DebugPublisher::assign_time(rclcpp::Time now) {
 
 void DebugPublisher::publish(rclcpp::Time now) {
 
-  if (!pub_data.mut.try_lock()) {
-    return;
-  }
   if (!pub_data.has_data) {
     return;
   }
@@ -108,28 +108,37 @@ void DebugPublisher::publish(rclcpp::Time now) {
 
     assign_time(now);
 
-    pose.pose = geom_utils::get_pose(pub_data.robot_state.O_T_EE);
-    current_pose_debug->publish(pose);
-
-    for (int i = 0; i < 7; i++) {
-      effort_cmd.effort_values[i] = pub_data.tau_d_last[i];
+    if (pub_data.current_pose.has_value()) {
+      pose.pose = pub_data.current_pose.value();
+      current_pose_debug->publish(pose);
     }
-    robot_joint_efforts_pub_debug->publish(effort_cmd);
 
-    for (int i = 0; i < 7; i++) {
-      effort_cmd.effort_values[i] = pub_data.gravity[i];
+    if (pub_data.tau_d_last.has_value()) {
+      for (int i = 0; i < 7; i++) {
+        effort_cmd.effort_values[i] = pub_data.tau_d_last.value()[i];
+      }
+      robot_joint_efforts_pub_debug->publish(effort_cmd);
     }
-    gravity_contribute_debug->publish(effort_cmd);
 
-    twist.twist.linear.x = pub_data.current_twist[0];
-    twist.twist.linear.y = pub_data.current_twist[1];
-    twist.twist.linear.z = pub_data.current_twist[2];
+    if (pub_data.gravity.has_value()) {
+      for (int i = 0; i < 7; i++) {
+        effort_cmd.effort_values[i] = pub_data.gravity.value()[i];
+      }
+      gravity_contribute_debug->publish(effort_cmd);
+    }
 
-    twist.twist.angular.x = pub_data.current_twist[3];
-    twist.twist.angular.y = pub_data.current_twist[4];
-    twist.twist.angular.z = pub_data.current_twist[5];
+    if (pub_data.current_twist.has_value()) {
 
-    current_velocity_debug->publish(twist);
+      twist.twist.linear.x = pub_data.current_twist.value()[0];
+      twist.twist.linear.y = pub_data.current_twist.value()[1];
+      twist.twist.linear.z = pub_data.current_twist.value()[2];
+
+      twist.twist.angular.x = pub_data.current_twist.value()[3];
+      twist.twist.angular.y = pub_data.current_twist.value()[4];
+      twist.twist.angular.z = pub_data.current_twist.value()[5];
+
+      current_velocity_debug->publish(twist);
+    }
 
     if (pub_data.current_j_dot_q_dot.has_value()) {
 
@@ -165,26 +174,29 @@ void DebugPublisher::publish(rclcpp::Time now) {
     // manipulability_index_debug->publish(double_stamped);
 
     // Eigen::Vector<double, 7> manip_ind_gradient =
-    //     manip_grad(current_joints_config_vec);
-    // for (int i = 0; i < 7; i++) {
+    // manip_grad(current_joints_config_vec); for (int i = 0; i < 7; i++) {
     //   arr_stamped.data[i] = manip_ind_gradient[i];
     // }
     // manipulability_index_grad_debug->publish(arr_stamped);
 
     // JOINT LIMIT INDEX
     Eigen::Vector<double, 7> current_joints_config_vec;
-    for (int i = 0; i < current_joints_config_vec.size(); i++) {
-      current_joints_config_vec[i] = pub_data.robot_state.q[i];
-    }
-    double_stamped.data = indexes::joint_limit_index(current_joints_config_vec);
-    joint_limits_index_debug->publish(double_stamped);
 
-    Eigen::Vector<double, 7> joint_limit_index_grad_vec =
-        indexes::joint_limit_index_grad(current_joints_config_vec);
-    for (int i = 0; i < 7; i++) {
-      arr_stamped.data[i] = joint_limit_index_grad_vec[i];
+    if (pub_data.robot_state.has_value()) {
+      for (int i = 0; i < current_joints_config_vec.size(); i++) {
+        current_joints_config_vec[i] = pub_data.robot_state.value().q[i];
+      }
+      double_stamped.data =
+          indexes::joint_limit_index(current_joints_config_vec);
+      joint_limits_index_debug->publish(double_stamped);
+
+      Eigen::Vector<double, 7> joint_limit_index_grad_vec =
+          indexes::joint_limit_index_grad(current_joints_config_vec);
+      for (int i = 0; i < 7; i++) {
+        arr_stamped.data[i] = joint_limit_index_grad_vec[i];
+      }
+      joint_limits_index_grad_debug->publish(arr_stamped);
     }
-    joint_limits_index_grad_debug->publish(arr_stamped);
 
     if (pub_data.y.has_value()) {
 
@@ -239,21 +251,23 @@ void DebugPublisher::publish(rclcpp::Time now) {
       desired_acceleration_debug->publish(accel);
 
       // Twist error
-      twist.twist.linear.x =
-          pub_data.des_twist.value().linear.x - pub_data.current_twist[0];
-      twist.twist.linear.y =
-          pub_data.des_twist.value().linear.y - pub_data.current_twist[1];
-      twist.twist.linear.z =
-          pub_data.des_twist.value().linear.z - pub_data.current_twist[2];
+      if (pub_data.current_twist.has_value()) {
+        twist.twist.linear.x = pub_data.des_twist.value().linear.x -
+                               pub_data.current_twist.value()[0];
+        twist.twist.linear.y = pub_data.des_twist.value().linear.y -
+                               pub_data.current_twist.value()[1];
+        twist.twist.linear.z = pub_data.des_twist.value().linear.z -
+                               pub_data.current_twist.value()[2];
 
-      twist.twist.angular.x =
-          pub_data.des_twist.value().angular.x - pub_data.current_twist[3];
-      twist.twist.angular.y =
-          pub_data.des_twist.value().angular.y - pub_data.current_twist[4];
-      twist.twist.angular.z =
-          pub_data.des_twist.value().angular.z - pub_data.current_twist[5];
+        twist.twist.angular.x = pub_data.des_twist.value().angular.x -
+                                pub_data.current_twist.value()[3];
+        twist.twist.angular.y = pub_data.des_twist.value().angular.y -
+                                pub_data.current_twist.value()[4];
+        twist.twist.angular.z = pub_data.des_twist.value().angular.z -
+                                pub_data.current_twist.value()[5];
 
-      velocity_error_debug->publish(twist);
+        velocity_error_debug->publish(twist);
+      }
     }
 
     // VELOCITY

@@ -4,6 +4,7 @@ echo "Choose controller"
 echo "1) (joint space) inverse dynamics controller"
 echo "2) Impedance controller"
 echo "3) Inverse dynamics controller -> trajectory -> Impedance controller -> Deactivate inverse dyn"
+echo "4) Only activate impedance controller"
 echo "0) Exit"
 
 read -r number
@@ -44,6 +45,18 @@ case "$number" in
     echo "Activated"
     echo "Deactivating inverse dynamics controller"
     ros2 lifecycle set /inverse_dynamics_controller deactivate
+    echo ""
+    ;;
+  4)
+    echo "Activating impedance controller"
+    echo "3.."
+    sleep 1
+    echo "2.."
+    sleep 1
+    echo "1.."
+    sleep 1
+    ros2 lifecycle set /impedance_controller activate
+    echo "Activated"
     echo ""
     ;;
   0)

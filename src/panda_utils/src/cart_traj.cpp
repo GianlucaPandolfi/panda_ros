@@ -133,19 +133,19 @@ public:
         realtime_tools::RealtimePublisher<geometry_msgs::msg::Pose>>(
         this->create_publisher<geometry_msgs::msg::Pose>(
             panda_interface_names::panda_pose_cmd_topic_name,
-            panda_interface_names::DEFAULT_TOPIC_QOS()));
+            panda_interface_names::CONTROLLER_SUBSCRIBER_QOS()));
 
     cmd_twist_pub = std::make_shared<
         realtime_tools::RealtimePublisher<geometry_msgs::msg::Twist>>(
         this->create_publisher<geometry_msgs::msg::Twist>(
             panda_interface_names::panda_twist_cmd_topic_name,
-            panda_interface_names::DEFAULT_TOPIC_QOS()));
+            panda_interface_names::CONTROLLER_SUBSCRIBER_QOS()));
 
     cmd_accel_pub = std::make_shared<
         realtime_tools::RealtimePublisher<geometry_msgs::msg::Accel>>(
         this->create_publisher<geometry_msgs::msg::Accel>(
             panda_interface_names::panda_accel_cmd_topic_name,
-            panda_interface_names::DEFAULT_TOPIC_QOS()));
+            panda_interface_names::CONTROLLER_SUBSCRIBER_QOS()));
   }
 
 private:
@@ -165,7 +165,7 @@ private:
 
     if (realtime_tools::has_realtime_kernel() &&
         !this->get_parameter("use_sim_time").as_bool()) {
-      if (!realtime_tools::configure_sched_fifo(98)) {
+      if (!realtime_tools::configure_sched_fifo(97)) {
         RCLCPP_WARN(this->get_logger(),
                     "Execute thread: Could not set SCHED_FIFO."
                     " Running with default scheduler.");
@@ -181,14 +181,17 @@ private:
     }
     rclcpp::Rate loop_rate(loop_rate_freq, this->get_clock());
 
-    RCLCPP_DEBUG(this->get_logger(), "Getting goal");
+    RCLCPP_INFO(this->get_logger(), "Getting goal");
     const auto goal = goal_handle->get_goal();
 
-    auto node = std::make_shared<rclcpp::Node>("wait_pose");
+    // auto node = std::make_shared<rclcpp::Node>("wait_pose");
+    // geometry_msgs::msg::PoseStamped initial_pose;
+    // rclcpp::wait_for_message<geometry_msgs::msg::PoseStamped>(
+    //     initial_pose, node,
+    //     panda_interface_names::panda_pose_state_topic_name, 10s,
+    //     panda_interface_names::CONTROLLER_PUBLISHER_QOS());
     geometry_msgs::msg::PoseStamped initial_pose;
-    rclcpp::wait_for_message<geometry_msgs::msg::PoseStamped>(
-        initial_pose, node, panda_interface_names::panda_pose_state_topic_name,
-        10s);
+    initial_pose.pose = goal->initial_pose;
 
     // Initial orientation
     Eigen::Quaterniond initial_quat{
@@ -341,14 +344,14 @@ int main(int argc, char **argv) {
   }
   if (!node->get_parameter("use_sim_time").as_bool()) {
 
-    if (!realtime_tools::configure_sched_fifo(98)) {
+    if (!realtime_tools::configure_sched_fifo(95)) {
       RCLCPP_ERROR(node->get_logger(),
                    "Couldn't configure real time priority for current node");
     } else {
       RCLCPP_INFO(node->get_logger(), "Set real time priority");
     }
   } else {
-      RCLCPP_INFO(node->get_logger(), "Simulation: realtime not requested");
+    RCLCPP_INFO(node->get_logger(), "Simulation: realtime not requested");
   }
 
   rclcpp::spin(node);
