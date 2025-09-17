@@ -44,7 +44,7 @@ struct debug_data {
   std::optional<std::array<double, 7>> tau_d_last = std::array<double, 7>{};
 
   // Robot internal state in franka::RobotState compact struct
-  std::optional<franka::RobotState> robot_state;
+  std::optional<franka::RobotState> robot_state = franka::RobotState{};
 
   // Gravity vector
   std::optional<std::array<double, 7>> gravity = std::array<double, 7>{};

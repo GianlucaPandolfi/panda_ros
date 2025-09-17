@@ -1972,11 +1972,12 @@ void ImpedanceController::control() {
       } else {
         y_cartesian =
             MD_1 *
-            (MD * desired_accel_vec + KD * error_twist + KP * error_pose_vec -
-             MD *
-                 get_j_dot(get_jacob, current_joints_config_vec,
-                           current_joints_speed) *
-                 current_joints_speed
+            (MD * desired_accel_vec + KD * error_twist + KP * error_pose_vec
+             // -
+             //    MD *
+             //        get_j_dot(get_jacob, current_joints_config_vec,
+             //                  current_joints_speed) *
+             //        current_joints_speed
              // MD *
              // panda.computeHessianTimesQDot(current_joints_config_vec,
              //                                    current_joints_speed,
@@ -2025,6 +2026,7 @@ void ImpedanceController::control() {
       debug_pub.data().lambda = lambda;
       debug_pub.data().sigma_min = sigma_min;
       debug_pub.data().current_twist = current_twist;
+      debug_pub.data().current_pose = current_pose_tmp;
       debug_pub.data().des_twist = desired_twist;
       debug_pub.data().des_pose = *desired_pose;
       debug_pub.data().des_accel = desired_accel;
