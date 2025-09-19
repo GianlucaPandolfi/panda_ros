@@ -883,7 +883,7 @@ public:
           initial_h_e = h_e_measured;
         }
         extern_tau = tau_ext_measured - initial_extern_tau;
-        h_e = h_e_measured - initial_h_e;
+        h_e = h_e_measured;
 
         // Calculate quantities for control
         // Calculated through libfranka lib for better accuracy
@@ -921,7 +921,7 @@ public:
                     //       get_j_dot(get_jacob, current_joints_config_vec,
                     //                 current_joints_speed) *
                     //       current_joints_speed
-                    - h_e
+                    // - h_e
 
                 );
           } else {
@@ -935,7 +935,7 @@ public:
                     //       get_j_dot(get_jacob, current_joints_config_vec,
                     //                 current_joints_speed) *
                     //       current_joints_speed
-                    - h_e
+                    // - h_e
 
                 );
           }
