@@ -110,6 +110,19 @@ def generate_launch_description():
         default_value='1.0',
         description='Secondary task gain'
     )
+
+    safe_joint_speed = DeclareLaunchArgument(
+        'safe_joint_speed',
+        default_value='0.7',
+        description='Maximum joint speed allowed'
+    )
+
+    safe_effort_perc = DeclareLaunchArgument(
+        'safe_effort_perc',
+        default_value='0.5',
+        description='Maximum percentage of maximum torque allowed'
+    )
+
     effort_cmd_server = Node(
         package='panda_utils',
         executable='send_joints_effort_server',
@@ -130,6 +143,7 @@ def generate_launch_description():
         package='panda_utils',
         executable='cart_traj',
         name='cart_traj_server',
+        prefix = ['taskset -c 4'],
         parameters=[{
             'use_sim_time': LaunchConfiguration('use_sim_time'),
             # 'loop_rate_freq': loop_rate_freq,
@@ -148,7 +162,7 @@ def generate_launch_description():
         package='panda_utils',
         executable='loop_cart_traj',
         name='loop_cart_traj_server',
-        # prefix = ['taskset -c 5'],
+        prefix = ['taskset -c 5'],
         parameters=[{
             'use_sim_time': LaunchConfiguration('use_sim_time'),
             # 'loop_rate_freq': loop_rate_freq,
@@ -158,6 +172,7 @@ def generate_launch_description():
         package='panda_utils',
         executable='human_presence',
         name='human_presence',
+        prefix = ['taskset -c 3'],
         parameters=[{
             'use_sim_time': LaunchConfiguration('use_sim_time'),
         }],
@@ -186,7 +201,7 @@ def generate_launch_description():
         name='impedance_controller',
         # prefix=["gdbserver localhost:3000"],
         # prefix=['taskset -c 10 kitty -e gdb -ex run --args'],
-        # prefix=['taskset -c 6'],
+        prefix=['taskset -c 6'],
         parameters=[{
             'use_sim_time': LaunchConfiguration('use_sim_time'),
             'Kp': LaunchConfiguration('controller_kp'),
@@ -202,7 +217,9 @@ def generate_launch_description():
             'use_robot': LaunchConfiguration('use_robot'),
             'use_franka_sim': LaunchConfiguration('use_franka_sim'),
             'robot_ip': LaunchConfiguration('robot_ip'),
-            'world_base_link': LaunchConfiguration('world_base_link')
+            'world_base_link': LaunchConfiguration('world_base_link'),
+            'safe_joint_speed': LaunchConfiguration('safe_joint_speed'),
+            'safe_effort_perc': LaunchConfiguration('safe_effort_perc')
         }],
     )
     publish_tfs_and_estimate_forces = Node(
@@ -234,6 +251,8 @@ def generate_launch_description():
         clik_gamma,
         alpha,
         task_gain,
+        safe_joint_speed,
+        safe_effort_perc,
         world_base_link,
         effort_cmd_server,
         cart_traj_server,
@@ -246,7 +265,7 @@ def generate_launch_description():
         # external_force_estimator,
 
         # clik_cmd_pub,
-        inverse_dynamics_controller,
+        # inverse_dynamics_controller,
         # publish_tfs_and_estimate_forces
-        joint_traj_server,
+        # joint_traj_server,
     ])

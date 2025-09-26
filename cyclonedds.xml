@@ -1,0 +1,18 @@
+<CycloneDDS>
+  <Domain Id="any">
+    <General>
+      <!-- <Interfaces> -->
+      <!--   <NetworkInterface autodetermine="true" priority="default" -->
+      <!--   multicast="default" /> -->
+      <!-- </Interfaces> -->
+      <AllowMulticast>false</AllowMulticast>
+      <NetworkInterfaceAddress>192.168.2.x</NetworkInterfaceAddress>
+      <!-- <MaxMessageSize>65500B</MaxMessageSize> -->
+    </General>
+    <Discovery>
+      <Peers>
+        <Peer address="192.168.2.y"/>
+      </Peers>
+    </Discovery>
+  </Domain>
+</CycloneDDS>

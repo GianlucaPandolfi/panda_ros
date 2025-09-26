@@ -90,6 +90,9 @@ ament_target_dependencies(stop_traj rclcpp panda_interfaces std_msgs tf2_eigen t
 add_executable(human_presence ./src/human_presence.cpp ./src/constants.cpp)
 ament_target_dependencies(human_presence rclcpp panda_interfaces std_msgs std_srvs tf2_eigen tf2 tf2_msgs sensor_msgs realtime_tools image_processing)
 
+add_executable(frame_publisher ./src/frame_publisher.cpp ./src/constants.cpp)
+ament_target_dependencies(frame_publisher rclcpp panda_interfaces std_msgs std_srvs tf2_eigen tf2 tf2_msgs sensor_msgs realtime_tools image_processing)
+
 add_executable(demo ./examples/demo.cpp ./src/constants.cpp)
 ament_target_dependencies(demo rclcpp panda_interfaces std_msgs tf2_eigen tf2 tf2_msgs sensor_msgs image_processing std_srvs)
 target_link_libraries(demo robot_model)
@@ -110,7 +113,7 @@ add_executable(joint_traj_example ./examples/joint_traj_example.cpp)
 ament_target_dependencies(joint_traj_example rclcpp panda_interfaces std_msgs tf2_eigen tf2 tf2_msgs sensor_msgs pinocchio ament_index_cpp rclcpp_lifecycle)
 
 add_executable(impedance_controller ./src/impedance_controller.cpp ./src/constants.cpp)
-ament_target_dependencies(impedance_controller rclcpp panda_interfaces std_msgs tf2_eigen tf2 tf2_msgs sensor_msgs pinocchio ament_index_cpp rclcpp_lifecycle realtime_tools tf2_geometry_msgs)
+ament_target_dependencies(impedance_controller rclcpp panda_interfaces std_msgs tf2_eigen tf2 tf2_msgs sensor_msgs pinocchio ament_index_cpp rclcpp_lifecycle realtime_tools tf2_geometry_msgs std_srvs)
 target_link_libraries(impedance_controller robot_model franka debug_publisher)
 
 add_executable(estimate_hand_external_force ./examples/hand_and_force_estimation.cpp)
@@ -132,6 +135,7 @@ install(TARGETS
   estimate_hand_external_force
   loop_cart_traj_example
   human_presence
+  frame_publisher
   DESTINATION lib/${PROJECT_NAME}
 )
 

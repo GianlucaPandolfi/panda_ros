@@ -193,7 +193,8 @@ private:
       human_present_pub->publish(human_presence);
       last_time = this->now();
 
-      // New Feature: Human contact estimation and publishing
+      // Only when human is present we estimate the distance between wrists and
+      // robot links
       if (presence_state_.human_present) {
         double min_dist_lw = std::numeric_limits<double>::infinity();
         std::string contacted_link_frame_lw = "";
@@ -207,7 +208,8 @@ private:
             image_constants::RIGHT_WRIST_IDX);
 
         for (auto robot_frame_name : panda_interface_names::panda_link_names) {
-          // Left Wrist
+
+          // Left Wrist distances
           try {
             auto tf_lw = tf_buffer_->lookupTransform(
                 robot_frame_name, left_wrist_frame_name, tf2::TimePointZero);
@@ -220,7 +222,7 @@ private:
             // Transform not found, ignore
           }
 
-          // Right Wrist
+          // Right Wrist distances
           try {
             auto tf_rw = tf_buffer_->lookupTransform(
                 robot_frame_name, right_wrist_frame_name, tf2::TimePointZero);
@@ -235,6 +237,9 @@ private:
         }
 
         // Left Wrist State Logic
+        // If under threshold is in contact; If over the 'no_contact' threshold
+        // is not in contact at all; If between the 2 thresholds is in
+        // Hysteresis mode
         if (min_dist_lw <= contact_threshold_) {
           left_wrist_state_ = CONTACT_THRESHOLD;
           last_contact_link_lw_ = contacted_link_frame_lw;
@@ -262,20 +267,18 @@ private:
           right_wrist_state_ = HYSTERESIS;
         }
 
-        panda_interfaces::msg::HumanContact contact_msg;
         if (left_wrist_state_ != NONE &&
             (right_wrist_state_ == NONE || min_dist_lw <= min_dist_rw)) {
-          contact_msg.in_contact_wrist.data = last_contact_wrist_lw_;
-          contact_msg.joint_frame.data = last_contact_link_lw_;
+          human_contact.in_contact_wrist.data = last_contact_wrist_lw_;
+          human_contact.joint_frame.data = last_contact_link_lw_;
         } else if (right_wrist_state_ != NONE) {
-          contact_msg.in_contact_wrist.data = last_contact_wrist_rw_;
-          contact_msg.joint_frame.data = last_contact_link_rw_;
+          human_contact.in_contact_wrist.data = last_contact_wrist_rw_;
+          human_contact.joint_frame.data = last_contact_link_rw_;
         } else {
           // No wrist in contact beyond hysteresis
-          contact_msg.in_contact_wrist.data = "";
-          contact_msg.joint_frame.data = "";
+          human_contact.in_contact_wrist.data = "";
+          human_contact.joint_frame.data = "";
         }
-        human_contact_pub->publish(contact_msg);
 
       } else { // Human not present in the area, clear any contact
         left_wrist_state_ = NONE;
@@ -285,11 +288,10 @@ private:
         last_contact_link_rw_ = "";
         last_contact_wrist_rw_ = "";
 
-        panda_interfaces::msg::HumanContact contact_msg;
-        contact_msg.in_contact_wrist.data = "";
-        contact_msg.joint_frame.data = "";
-        human_contact_pub->publish(contact_msg);
+        human_contact.in_contact_wrist.data = "";
+        human_contact.joint_frame.data = "";
       }
+      human_contact_pub->publish(human_contact);
 
       rclcpp::sleep_for(100ms);
     }

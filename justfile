@@ -3,6 +3,10 @@ build:
 	colcon build
 
 [no-cd]
+release:
+	colcon build --cmake-args -DCMAKE_BUILD_TYPE=Release
+
+[no-cd]
 init: 
   build
 
