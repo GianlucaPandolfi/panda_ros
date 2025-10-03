@@ -80,6 +80,10 @@ void DebugPublisher::create_pubs(
       node->create_publisher<panda_interfaces::msg::DoubleStamped>(
           "debug/lambda", qos);
 
+  theta_error_debug =
+      node->create_publisher<panda_interfaces::msg::DoubleStamped>(
+          "debug/theta_error_orientation", qos);
+
   manipulability_index_debug =
       node->create_publisher<panda_interfaces::msg::DoubleStamped>(
           "debug/manipulability_index", qos);
@@ -189,6 +193,11 @@ void DebugPublisher::publish(rclcpp::Time now) {
     if (pub_data.lambda.has_value()) {
       double_stamped.data = pub_data.lambda.value();
       lamda_dls_debug->publish(double_stamped);
+    }
+
+    if (pub_data.error_theta.has_value()) {
+      double_stamped.data = pub_data.error_theta.value();
+      theta_error_debug->publish(double_stamped);
     }
 
     // YOSHIKAWA INDEX

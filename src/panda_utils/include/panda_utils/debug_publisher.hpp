@@ -91,6 +91,9 @@ struct debug_data {
 
   // Pose error (Quaternion as w, x, y, z)
   Eigen::Vector<double, 7> error_pose_vec;
+  
+  // Orientation error (Expressed as angle of axis angle representation in degrees)
+  std::optional<double> error_theta;
 
   // External forces on EE
   std::optional<Eigen::Vector<double, 6>> h_e = Eigen::Vector<double, 6>{};
@@ -161,6 +164,7 @@ private:
   Publisher<TwistStamped>::SharedPtr current_velocity_debug{};
   Publisher<TwistStamped>::SharedPtr current_jdot_qdot_debug{};
   Publisher<panda_interfaces::msg::DoubleStamped>::SharedPtr lamda_dls_debug{};
+  Publisher<panda_interfaces::msg::DoubleStamped>::SharedPtr theta_error_debug{};
 
   Publisher<panda_interfaces::msg::DoubleArrayStamped>::SharedPtr
       manipulability_index_grad_debug{};
