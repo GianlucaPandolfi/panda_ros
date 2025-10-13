@@ -1263,6 +1263,9 @@ public:
 
           // Applied external force frame
           std::thread{[this]() {
+            std::vector<franka::Frame> frame_to_change_gains{
+                franka::Frame::kJoint1, franka::Frame::kJoint2,
+                franka::Frame::kJoint3, franka::Frame::kJoint4};
             while (start_flag.load() && rclcpp::ok()) {
               if (compliance_mode.load()) {
                 if (!human_contact_info.in_contact_wrist.data.empty() &&
@@ -1273,8 +1276,12 @@ public:
                                                             .joint_frame.data];
                     if (!last_joint_contact_frame.has_value()) {
                       // Update md
-                      set_md(10.0);
-                      set_kd(10.0);
+                      if (std::find(frame_to_change_gains.begin(),
+                                    frame_to_change_gains.end(),
+                                    last_joint_contact_frame_new) !=
+                          frame_to_change_gains.end()) {
+                        set_md_kd(7.0);
+                      }
                       last_joint_contact_frame = last_joint_contact_frame_new;
                     }
 
@@ -1290,22 +1297,20 @@ public:
                     RCLCPP_ERROR(this->get_logger(),
                                  "Error calculating external force frame: %s",
                                  ex.what());
-                    set_md();
-                    set_kd();
                     last_joint_contact_frame = std::nullopt;
                     transform_to_wrist = std::nullopt;
+                    set_md_kd();
                   }
                 } else {
-                  set_md();
-                  set_kd();
-                  std::this_thread::sleep_for(500ms);
                   last_joint_contact_frame = std::nullopt;
                   transform_to_wrist = std::nullopt;
+                  set_md_kd();
+                  std::this_thread::sleep_for(500ms);
                 }
               } else {
-                std::this_thread::sleep_for(1s);
                 last_joint_contact_frame = std::nullopt;
                 transform_to_wrist = std::nullopt;
+                std::this_thread::sleep_for(1s);
               }
               std::this_thread::sleep_for(50ms);
             }
@@ -1692,7 +1697,7 @@ private:
       if (t > 1.0) {
         t = 1.0;
       }
-      KD = final_KD * t + initial_KD * (1.0 - t);
+      KD = initial_KD + t * (final_KD - initial_KD);
       rclcpp::sleep_for(5ms);
     }
     KD = final_KD * 1.0;
@@ -1728,13 +1733,65 @@ private:
       if (t > 1.0) {
         t = 1.0;
       }
-      MD = final_MD * t + initial_MD * (1.0 - t);
-      MD_1 = final_MD_1 * t + initial_MD_1 * (1.0 - t);
+      // MD = final_MD * t + initial_MD * (1.0 - t);
+      // MD_1 = final_MD_1 * t + initial_MD_1 * (1.0 - t);
+      MD = initial_MD + t * (final_MD - initial_MD);
+      MD_1 = initial_MD_1 + t * (final_MD_1 - initial_MD_1);
       rclcpp::sleep_for(5ms);
     }
     MD = final_MD * 1.0;
     MD_1 = final_MD_1 * 1.0;
     RCLCPP_INFO_STREAM(this->get_logger(), "Set MD: " << MD);
+  }
+
+  void set_md_kd(double mul = 1.0) {
+
+    Eigen::Vector<double, 6> MD_{Md,           Md,           Md,
+                                 Md_rot * mul, Md_rot * mul, Md_rot * mul};
+    Eigen::Vector<double, 6> MD_1_{1.0 / Md,
+                                   1.0 / Md,
+                                   1.0 / Md,
+                                   1.0 / (Md_rot * mul),
+                                   1.0 / (Md_rot * mul),
+                                   1.0 / (Md_rot * mul)};
+
+    Eigen::Matrix<double, 6, 6> final_MD =
+        Eigen::Matrix<double, 6, 6>::Identity();
+    Eigen::Matrix<double, 6, 6> final_MD_1 =
+        Eigen::Matrix<double, 6, 6>::Identity();
+    final_MD.diagonal() = MD_;
+    final_MD_1.diagonal() = MD_1_;
+
+    Eigen::Vector<double, 6> KD_{Kd,           Kd,           Kd,
+                                 Kd_rot * mul, Kd_rot * mul, Kd_rot * mul};
+    Eigen::Matrix<double, 6, 6> final_KD =
+        Eigen::Matrix<double, 6, 6>::Identity();
+    final_KD.diagonal() = KD_;
+
+    if (KD == final_KD && MD == final_MD && MD_1 == final_MD_1) {
+      return;
+    }
+
+    Eigen::Matrix<double, 6, 6> initial_KD = KD;
+    Eigen::Matrix<double, 6, 6> initial_MD = MD;
+    Eigen::Matrix<double, 6, 6> initial_MD_1 = MD_1;
+
+    auto start = this->now();
+    while ((this->now() - start).seconds() < 1.0) {
+      auto t = (this->now() - start).seconds();
+      if (t > 1.0) {
+        t = 1.0;
+      }
+      KD = initial_KD + t * (final_KD - initial_KD);
+      MD = initial_MD + t * (final_MD - initial_MD);
+      MD_1 = initial_MD_1 + t * (final_MD_1 - initial_MD_1);
+      rclcpp::sleep_for(5ms);
+    }
+    KD = final_KD * 1.0;
+    MD = final_MD * 1.0;
+    MD_1 = final_MD_1 * 1.0;
+    RCLCPP_INFO_STREAM(this->get_logger(), "Set MD: " << MD);
+    RCLCPP_INFO_STREAM(this->get_logger(), "Set KD: " << KD);
   }
 
   void set_kd_j() {
@@ -1743,7 +1800,7 @@ private:
     // in control law
     double joint_damping = 10.0;
     // double effort_ratio = 12.0 / 87.0;
-    double effort_ratio = 1.0;
+    double effort_ratio = 0.6;
     Eigen::Vector<double, 7> KD_J_{joint_damping,
                                    joint_damping,
                                    joint_damping,
