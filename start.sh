@@ -42,6 +42,7 @@ case "$number" in
     echo "Configured"
     sleep 1
     ros2 lifecycle set /impedance_controller activate
+    sleep 3
     echo "Activated"
     echo "Deactivating inverse dynamics controller"
     ros2 lifecycle set /inverse_dynamics_controller deactivate

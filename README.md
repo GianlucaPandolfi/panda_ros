@@ -1,3 +1,10 @@
+## Dependencies  
+
+```
+sudo apt install ros-jazzy-{depth-image-proc,pinocchio,camera-info-manager,realtime-tools}
+cd src/yolo_ros
+pip install -r requirements.txt
+```
 
 ## Configuration
 
