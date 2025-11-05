@@ -547,13 +547,15 @@ public:
               if (t > 1.0) {
                 t = 1.0;
               }
-              KD = (initial_KD * 1.0) * t + initial_KD * (1.0 - t);
+              KD = (initial_KD * 0.6) * t + initial_KD * (1.0 - t);
               KP = initial_KP * exp(-9.0 * t);
               // KD_J = initial_KD_J * exp(-9.0 * t);
               rclcpp::sleep_for(5ms);
             }
             KP = KP * 0.0;
-            KD_J = KD_J * 0.0;
+            
+            set_md_kd(2.0);
+            // KD_J = KD_J * 0.0;
             RCLCPP_INFO_STREAM(this->get_logger(), "KP = " << KP);
             RCLCPP_INFO_STREAM(this->get_logger(), "KD = " << KD);
             RCLCPP_INFO_STREAM(this->get_logger(), "KD_J = " << KD_J);
@@ -589,6 +591,7 @@ public:
             set_kd_j();
             set_kp();
             set_kd();
+            set_md();
             compliance_mode.store(false);
             response->result = true;
             RCLCPP_INFO(this->get_logger(), "Unset controller compliance mode");
@@ -697,13 +700,9 @@ public:
 
       set_kd();
 
-      Eigen::Vector<double, 6> MD_{Md, Md, Md, Md_rot, Md_rot, Md_rot};
-      Eigen::Matrix<double, 6, 6> MD = Eigen::Matrix<double, 6, 6>::Identity();
-      MD.diagonal() = MD_;
-      Eigen::Matrix<double, 6, 6> MD_1 = MD.inverse();
+      set_md();
 
       set_kd_j();
-      RCLCPP_INFO_STREAM(this->get_logger(), "Joint vel damping: " << KD_J);
 
       // Coefficient for dynamic lambda damping
       double k_max = this->get_parameter("k_max").as_double();
@@ -738,7 +737,7 @@ public:
       joint_state_to_pub.name = std::vector<std::string>{
           "joint1", "joint2", "joint3", "joint4", "joint5", "joint6", "joint7"};
 
-      robot_control_callback = [this, MD, MD_1, k_max, eps, get_jacob](
+      robot_control_callback = [this, k_max, eps, get_jacob](
                                    const franka::RobotState &state,
                                    franka::Duration dt) -> franka::Torques {
         if (!(start_flag.load() && rclcpp::ok())) {
@@ -997,7 +996,7 @@ public:
                                         "Running safety check: effort limit");
                 RCLCPP_ERROR_STREAM(this->get_logger(),
                                     "Torque abs value over limit ("
-                                        << percentage_effort_safe_limit * 10.0
+                                        << percentage_effort_safe_limit * 100.0
                                         << "%)");
                 panda_franka->stop();
                 start_flag.store(false);
@@ -1266,14 +1265,28 @@ public:
 
           // Applied external force frame
           std::thread{[this]() {
+            std::vector<franka::Frame> frame_to_change_gains{
+                franka::Frame::kJoint1, franka::Frame::kJoint2,
+                franka::Frame::kJoint3, franka::Frame::kJoint4};
             while (start_flag.load() && rclcpp::ok()) {
               if (compliance_mode.load()) {
                 if (!human_contact_info.in_contact_wrist.data.empty() &&
                     !human_contact_info.joint_frame.data.empty()) {
                   try {
-                    last_joint_contact_frame =
+                    auto last_joint_contact_frame_new =
                         robot_link_name_to_franka_frame[human_contact_info
                                                             .joint_frame.data];
+                    if (!last_joint_contact_frame.has_value()) {
+                      // Update md
+                      if (std::find(frame_to_change_gains.begin(),
+                                    frame_to_change_gains.end(),
+                                    last_joint_contact_frame_new) !=
+                          frame_to_change_gains.end()) {
+                        set_md_kd(7.0);
+                      }
+                      last_joint_contact_frame = last_joint_contact_frame_new;
+                    }
+
                     // geometry_msgs::msg::TransformStamped transform =
                     //     tf_buffer->lookupTransform(
                     //         human_contact_info.joint_frame.data,
@@ -1288,12 +1301,18 @@ public:
                                  ex.what());
                     last_joint_contact_frame = std::nullopt;
                     transform_to_wrist = std::nullopt;
+                    set_md_kd(2.0);
                   }
+                } else {
+                  last_joint_contact_frame = std::nullopt;
+                  transform_to_wrist = std::nullopt;
+                  set_md_kd(2.0);
+                  std::this_thread::sleep_for(500ms);
                 }
               } else {
-                std::this_thread::sleep_for(500ms);
                 last_joint_contact_frame = std::nullopt;
                 transform_to_wrist = std::nullopt;
+                std::this_thread::sleep_for(1s);
               }
               std::this_thread::sleep_for(50ms);
             }
@@ -1344,7 +1363,6 @@ public:
           }
           // clang-format on
           panda_franka->control(robot_control_callback);
-
         } catch (const franka::Exception &ex) {
 
           start_flag.store(false);
@@ -1625,6 +1643,8 @@ private:
   double Md_rot{};
   Eigen::Matrix<double, 6, 6> KP{};
   Eigen::Matrix<double, 6, 6> KD{};
+  Eigen::Matrix<double, 6, 6> MD{};
+  Eigen::Matrix<double, 6, 6> MD_1{};
   Eigen::Matrix<double, 7, 7> KD_J{};
   double joint_speed_safe_limit{};
   double percentage_effort_safe_limit{};
@@ -1645,6 +1665,7 @@ private:
         Eigen::Matrix<double, 6, 6>::Identity();
     final_KP.diagonal() = KP_;
     if (final_KP == KP) {
+      RCLCPP_INFO_STREAM(this->get_logger(), "Set KP: " << KP);
       return;
     }
     KP = Eigen::Matrix<double, 6, 6>::Zero();
@@ -1654,31 +1675,127 @@ private:
       if (t > 1.0) {
         t = 1.0;
       }
-      KP = final_KP * 1.0;
+      KP = final_KP * t;
       rclcpp::sleep_for(5ms);
     }
-    RCLCPP_INFO(this->get_logger(), "Set KP");
+    KP = final_KP * 1.0;
+    RCLCPP_INFO_STREAM(this->get_logger(), "Set KP: " << KP);
   }
 
-  void set_kd() {
-    Eigen::Vector<double, 6> KD_{Kd, Kd, Kd, Kd_rot, Kd_rot, Kd_rot};
+  void set_kd(double mul = 1.0) {
+    Eigen::Vector<double, 6> KD_{Kd,           Kd,           Kd,
+                                 Kd_rot * mul, Kd_rot * mul, Kd_rot * mul};
     Eigen::Matrix<double, 6, 6> final_KD =
         Eigen::Matrix<double, 6, 6>::Identity();
     final_KD.diagonal() = KD_;
     if (final_KD == KD) {
+      RCLCPP_INFO_STREAM(this->get_logger(), "Set KD: " << KD);
       return;
     }
-    KD = Eigen::Matrix<double, 6, 6>::Zero();
+    Eigen::Matrix<double, 6, 6> initial_KD = KD;
     auto start = this->now();
     while ((this->now() - start).seconds() < 1.0) {
       auto t = (this->now() - start).seconds();
       if (t > 1.0) {
         t = 1.0;
       }
-      KD = final_KD * 1.0;
+      KD = initial_KD + t * (final_KD - initial_KD);
       rclcpp::sleep_for(5ms);
     }
-    RCLCPP_INFO(this->get_logger(), "Set KD");
+    KD = final_KD * 1.0;
+    RCLCPP_INFO_STREAM(this->get_logger(), "Set KD: " << KD);
+  }
+
+  void set_md(double mul = 1.0) {
+
+    Eigen::Vector<double, 6> MD_{Md,           Md,           Md,
+                                 Md_rot * mul, Md_rot * mul, Md_rot * mul};
+    Eigen::Vector<double, 6> MD_1_{1.0 / Md,
+                                   1.0 / Md,
+                                   1.0 / Md,
+                                   1.0 / (Md_rot * mul),
+                                   1.0 / (Md_rot * mul),
+                                   1.0 / (Md_rot * mul)};
+
+    Eigen::Matrix<double, 6, 6> final_MD =
+        Eigen::Matrix<double, 6, 6>::Identity();
+    Eigen::Matrix<double, 6, 6> final_MD_1 =
+        Eigen::Matrix<double, 6, 6>::Identity();
+    final_MD.diagonal() = MD_;
+    final_MD_1.diagonal() = MD_1_;
+    if (final_MD == MD && final_MD_1 == MD_1) {
+      RCLCPP_INFO_STREAM(this->get_logger(), "Set MD: " << MD);
+      return;
+    }
+    Eigen::Matrix<double, 6, 6> initial_MD = MD;
+    Eigen::Matrix<double, 6, 6> initial_MD_1 = MD_1;
+    auto start = this->now();
+    while ((this->now() - start).seconds() < 1.0) {
+      auto t = (this->now() - start).seconds();
+      if (t > 1.0) {
+        t = 1.0;
+      }
+      // MD = final_MD * t + initial_MD * (1.0 - t);
+      // MD_1 = final_MD_1 * t + initial_MD_1 * (1.0 - t);
+      MD = initial_MD + t * (final_MD - initial_MD);
+      MD_1 = initial_MD_1 + t * (final_MD_1 - initial_MD_1);
+      rclcpp::sleep_for(5ms);
+    }
+    MD = final_MD * 1.0;
+    MD_1 = final_MD_1 * 1.0;
+    RCLCPP_INFO_STREAM(this->get_logger(), "Set MD: " << MD);
+  }
+
+  void set_md_kd(double mul = 1.0) {
+
+    Eigen::Vector<double, 6> MD_{Md,           Md,           Md,
+                                 Md_rot * mul, Md_rot * mul, Md_rot * mul};
+    Eigen::Vector<double, 6> MD_1_{1.0 / Md,
+                                   1.0 / Md,
+                                   1.0 / Md,
+                                   1.0 / (Md_rot * mul),
+                                   1.0 / (Md_rot * mul),
+                                   1.0 / (Md_rot * mul)};
+    double eta = Kd_rot / (2 * std::sqrt(Kp_rot * Md_rot));
+    double Kd_rot_mod = 2 * eta * std::sqrt(Kp_rot * Md_rot * mul);
+
+    Eigen::Matrix<double, 6, 6> final_MD =
+        Eigen::Matrix<double, 6, 6>::Identity();
+    Eigen::Matrix<double, 6, 6> final_MD_1 =
+        Eigen::Matrix<double, 6, 6>::Identity();
+    final_MD.diagonal() = MD_;
+    final_MD_1.diagonal() = MD_1_;
+
+    Eigen::Vector<double, 6> KD_{Kd,         Kd,         Kd,
+                                 Kd_rot_mod, Kd_rot_mod, Kd_rot_mod};
+    Eigen::Matrix<double, 6, 6> final_KD =
+        Eigen::Matrix<double, 6, 6>::Identity();
+    final_KD.diagonal() = KD_;
+
+    if (KD == final_KD && MD == final_MD && MD_1 == final_MD_1) {
+      return;
+    }
+
+    Eigen::Matrix<double, 6, 6> initial_KD = KD;
+    Eigen::Matrix<double, 6, 6> initial_MD = MD;
+    Eigen::Matrix<double, 6, 6> initial_MD_1 = MD_1;
+
+    auto start = this->now();
+    while ((this->now() - start).seconds() < 1.0) {
+      auto t = (this->now() - start).seconds();
+      if (t > 1.0) {
+        t = 1.0;
+      }
+      KD = initial_KD + t * (final_KD - initial_KD);
+      MD = initial_MD + t * (final_MD - initial_MD);
+      MD_1 = initial_MD_1 + t * (final_MD_1 - initial_MD_1);
+      rclcpp::sleep_for(5ms);
+    }
+    KD = final_KD * 1.0;
+    MD = final_MD * 1.0;
+    MD_1 = final_MD_1 * 1.0;
+    RCLCPP_INFO_STREAM(this->get_logger(), "Set MD: " << MD);
+    RCLCPP_INFO_STREAM(this->get_logger(), "Set KD: " << KD);
   }
 
   void set_kd_j() {
@@ -1687,7 +1804,7 @@ private:
     // in control law
     double joint_damping = 10.0;
     // double effort_ratio = 12.0 / 87.0;
-    double effort_ratio = 1.0;
+    double effort_ratio = 0.6;
     Eigen::Vector<double, 7> KD_J_{joint_damping,
                                    joint_damping,
                                    joint_damping,
@@ -1699,20 +1816,21 @@ private:
         Eigen::Matrix<double, 7, 7>::Identity();
     final_KD_J.diagonal() = KD_J_;
     if (final_KD_J == KD_J) {
+      RCLCPP_INFO_STREAM(this->get_logger(), "Set KD_J: " << KD_J);
       return;
     }
-    KD_J = Eigen::Matrix<double, 7, 7>::Zero();
+    Eigen::Matrix<double, 7, 7> initial_KD_J = KD_J;
     auto start = this->now();
     while ((this->now() - start).seconds() < 1.0) {
       auto t = (this->now() - start).seconds();
       if (t > 1.0) {
         t = 1.0;
       }
-      KD_J = final_KD_J * t;
+      KD_J = initial_KD_J + t * (final_KD_J - initial_KD_J);
       rclcpp::sleep_for(5ms);
     }
-      KD_J = final_KD_J * 1.0;
-    RCLCPP_INFO(this->get_logger(), "Set KD_J");
+    KD_J = final_KD_J * 1.0;
+    RCLCPP_INFO_STREAM(this->get_logger(), "Set KD_J: " << KD_J);
   }
 
   Eigen::Vector<double, 7>
