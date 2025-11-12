@@ -5,4 +5,5 @@ language = "en"
 
 [output.html]
 mathjax-support = true
-
+# render-toc-on-page = true
+# preferred-toc-level = 2

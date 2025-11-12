@@ -192,9 +192,7 @@ public:
       : Node("skeleton_tracker"), min_depth(min_depth), max_depth(max_depth) {
 
     RCLCPP_INFO_STREAM(this->get_logger(), "Getting parameters");
-    this->declare_parameter<double>("process_noise", 0.5);
     this->declare_parameter<double>("measurement_noise", 1.0);
-    this->declare_parameter<bool>("no_depth", false);
     this->declare_parameter<bool>("debug", false);
     this->declare_parameter<bool>("filter", false);
     this->declare_parameter<bool>("predict", true);
@@ -224,9 +222,6 @@ public:
     // Initializing kalman filter variables
     //
 
-    // kalman_params.Q.setIdentity();
-    // kalman_params.Q *= this->get_parameter("process_noise").as_double();
-
     kalman_params.Q.setZero();
 
     kalman_params.R.setIdentity();
@@ -254,8 +249,6 @@ public:
       point.y = 0.0;
       point.z = 0.0;
     }
-
-    bool no_depth = this->get_parameter("no_depth").as_bool();
 
     RCLCPP_INFO_STREAM(this->get_logger(), "Declaring callbacks");
     auto det_array_cb =
@@ -302,13 +295,8 @@ public:
 
     std::string depth_image_topic;
     std::string depth_camera_info_topic;
-    if (no_depth) {
-      depth_camera_info_topic = image_constants::rgb_camera_info_topic;
-      depth_image_topic = image_constants::rgb_image_topic;
-    } else {
-      depth_camera_info_topic = image_constants::depth_camera_info_topic;
-      depth_image_topic = image_constants::depth_image_topic;
-    }
+    depth_camera_info_topic = image_constants::depth_camera_info_topic;
+    depth_image_topic = image_constants::depth_image_topic;
 
     rgb_camera_info_sub =
         this->create_subscription<sensor_msgs::msg::CameraInfo>(

@@ -56,3 +56,20 @@ A **constant velocity model** is used for each keypoint. This assumption is obvi
 The output noise is simply a diagonal matrix with the same covariance value for all directions.  
 
 The removal of the outlier is based on the [mahalanobis distances](https://en.wikipedia.org/wiki/Mahalanobis_distance) of the innovation computed at each step; the distance is then compared to the quantile of a \\( \chi^2 \\) distribution with 3 degrees of freedom and with a confidence level of 0.9 (90%): if the distance is less than the quantile, the measure is accepted and the **update step** of the filter is computed; otherwise, it is rejected and the filter compute only the **prediction step**.
+
+## Launch files and parameters  
+
+The package contains a single launch file spawning the node. The paramers are the following: 
+
+- **use_sim_time**
+- **ma_confidence_threshold**, **hallucination_threshold**, **single_keypoint_ma_confidence_threshold**: decision metrics relative thresholds
+- **ma_window_size**: window size to consider for moving average
+- **filter**: whether or not use the kalman filter for the keypoints
+- **predict**: whether or not to predict the position of the keypoints when skeleton is lost
+- **debug**: whether or not print debug info
+
+An example of launch file: 
+
+```bash
+ ros2 launch image_processing launch_yolo_tracker.py measurement_noise:=0.9 hallucination_threshold:=0.0 single_keypoint_ma_confidence_threshold:=0.80 ma_confidence_threshold:=0.80 MA_window_size:=10 use_sim_time:=false filter:=true debug:=true predict:=false
+```

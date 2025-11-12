@@ -11,16 +11,6 @@ def generate_launch_description():
         default_value='true',
         description='Use simulation (Gazebo) clock if true')
 
-    no_depth = DeclareLaunchArgument(
-        'no_depth',
-        default_value='false',
-        description="Don't estimate depth from depth image")
-
-    process_noise = DeclareLaunchArgument(
-        'process_noise',
-        default_value='20.0',
-        description="Process scalar noise value")
-
     measurement_noise = DeclareLaunchArgument(
         'measurement_noise',
         default_value='50.0',
@@ -67,8 +57,6 @@ def generate_launch_description():
         name='skeleton_track_yolo',
         parameters=[{
             'use_sim_time': LaunchConfiguration('use_sim_time'),
-            'no_depth': LaunchConfiguration('no_depth'),
-            'process_noise': LaunchConfiguration('process_noise'),
             'measurement_noise': LaunchConfiguration('measurement_noise'),
             'ma_confidence_threshold': LaunchConfiguration('ma_confidence_threshold'),
             'hallucination_threshold': LaunchConfiguration('hallucination_threshold'),
@@ -82,9 +70,7 @@ def generate_launch_description():
 
     return LaunchDescription([
         measurement_noise,
-        process_noise,
         use_sim_time,
-        no_depth,
         ma_window_size,
         ma_confidence_threshold,
         hallucination_threshold,

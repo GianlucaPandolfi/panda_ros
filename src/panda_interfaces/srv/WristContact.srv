@@ -1,4 +1,0 @@
-std_msgs/String wrist
-bool contact
----
-bool success

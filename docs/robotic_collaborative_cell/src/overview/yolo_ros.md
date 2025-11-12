@@ -20,7 +20,7 @@ The parameters used are the following:
 - **use_sim_time**: whether to consider real or sim time 
 
 Example: 
-```shell
+```bash
 ros2 launch yolo_bringup yolov8.launch.py model:=yolov8n-pose.pt max_det:=1\
 input_image_topic:=/image_raw input_depth_topic:=/depth/image_raw\
 input_depth_info_topic:=/camera_info target_frame:=kinect_rgb\

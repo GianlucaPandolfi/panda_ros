@@ -485,6 +485,9 @@ public:
     Kp = this->get_parameter("Kp").as_double();
     Kd = this->get_parameter("Kd").as_double();
     Md = this->get_parameter("Md").as_double();
+    Kp_rot = this->get_parameter("Kp_rot").as_double();
+    Kd_rot = this->get_parameter("Kd_rot").as_double();
+    Md_rot = this->get_parameter("Md_rot").as_double();
     control_loop_rate = std::make_shared<rclcpp::Rate>(
         this->get_parameter("control_freq").as_double(), this->get_clock());
     clamp = this->get_parameter("clamp").as_bool();
@@ -504,6 +507,16 @@ public:
             << " with Kp = " << Kp << ", Kd = " << Kd << ", Md = " << Md
             << ", Kp_rot = " << Kp_rot << ", Kd_rot = " << Kd_rot
             << ", Md_rot = " << Md_rot);
+
+    RCLCPP_INFO(this->get_logger(), "Setting controller gains");
+
+    set_kp();
+
+    set_kd();
+
+    set_md();
+
+    set_kd_j();
 
     switch (mode) {
     case Mode::franka: {
@@ -544,14 +557,6 @@ public:
                                  panda_franka_model.value(),
                                  this->get_logger());
 
-      set_kp();
-
-      set_kd();
-
-      set_md();
-
-      set_kd_j();
-
       // Used for J_dot calculation
       auto get_jacob = [this](
                            const Eigen::Vector<double, 7> &current_joint_pos) {
@@ -578,11 +583,6 @@ public:
       joint_state_to_pub.name = std::vector<std::string>{
           "joint1", "joint2", "joint3", "joint4", "joint5", "joint6", "joint7"};
 
-      // Callback passed to libfranka library. The callback handles the control
-      // of the robot, implementing the control law. Furthermore, the callback
-      // handles the update of the robot state in the ROS2 network, copying the
-      // variables within the `franka::RobotState` object and exposing them to
-      // the other nodes through Publishers
       robot_control_callback =
           [this, get_jacob](const franka::RobotState &state,
                             franka::Duration dt) -> franka::Torques {
@@ -1373,6 +1373,14 @@ private:
   std::unique_ptr<tf2_ros::TransformBroadcaster> tf_broadcaster;
   std::unique_ptr<tf2_ros::StaticTransformBroadcaster> static_tf_broadcaster;
 
+  /**
+   * @brief Callback passed to libfranka library. The callback handles the control
+   * of the robot, implementing the control law. Furthermore, the callback
+   * handles the update of the robot state in the ROS2 network, copying the
+   * variables within the `franka::RobotState` object and exposing them to
+   * the other nodes through Publishers
+   *
+   */
   std::function<franka::Torques(const franka::RobotState &, franka::Duration)>
       robot_control_callback;
   JointState joint_state_to_pub{};
@@ -1828,7 +1836,6 @@ void ImpedanceController::control() {
   set_md();
 
   set_kd_j();
-
   while (start_flag.load() && rclcpp::ok()) {
 
     pose_debug.header.stamp = this->now();
@@ -1932,7 +1939,6 @@ void ImpedanceController::control() {
     h_e = jacobian_pinv.transpose() * extern_tau_filtered;
     {
       std::lock_guard<std::mutex> lock(desired_accel_mutex);
-      RCLCPP_INFO_STREAM_ONCE(this->get_logger(), "h_e: " << h_e);
 
       // clang-format off
       if (compliance_mode.load()) {

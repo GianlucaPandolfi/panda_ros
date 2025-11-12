@@ -76,7 +76,7 @@ enum class SceneState {
 };
 
 ```
-
+The demo is started/stopped through a `SetBool` service.  
 The task accomplished by the robot is an infinite cartesian trajectory describing a triangle in a fixed plane in space, with a constant orientation. The demo can be monitored with the node described in the [next section](./demo_visulization_app.md).
 
 ## Launch files and parameters  
