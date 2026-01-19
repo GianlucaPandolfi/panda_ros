@@ -11,6 +11,7 @@
 ## Install  
 
 ```shell
+sudo apt install ros-jazzy-{depth-image-proc,pinocchio,camera-info-manager,realtime-tools}
 git clone <repository link>
 cd panda_ros
 cd yolo_ros
