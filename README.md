@@ -23,7 +23,7 @@ rosdep install --from-paths src --ignore-src -r -y
 ## Building  
 
 ```shell
-colcon build
+colcon build --cmake-args -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_FLAGS_RELEASE="-O1 -DNDEBUG"
 ```
 
 ## Configuration (2 machines setup)
