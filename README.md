@@ -1,6 +1,6 @@
 # Detailed guide and overview  
 
-A detailed guide and overview of the entire project is available as [mdbook](https://gianlucapandolfi.github.io/panda_ros/)
+A detailed guide and overview of the entire project is available as [mdbook](https://gianlucapandolfi.github.io/panda_collaborative_cell)
 
 ## System requirements  
 
